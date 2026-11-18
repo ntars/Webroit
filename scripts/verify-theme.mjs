@@ -9,9 +9,19 @@
  * 检查三件事：
  * 1. 所有非语义色 token 的色度（max-min）足够低，即确实是中性灰
  * 2. 不变量：深色主题下强调色必须是浅的，浅色主题下必须是深的
- * 3. 正文、导航、卡片标题、主按钮文字的对比度达到 WCAG AA 4.5:1
+ * 3. 对比度：全部前景 token × 全部背景 token 的矩阵，逐对校验
  *
- * 用法：node scripts/verify-theme.mjs
+ * 第 3 项早期只测了 4 对色（正文/导航/卡片标题/主按钮），
+ * --text-secondary、--text-tertiary、--success、--warning、--danger、
+ * 终端配色与表单控件边框全在盲区里。盲区里恰好藏着真缺陷：
+ * 浅色 --text-tertiary 只有 3.9:1、开关关态的滑轨与滑块只有 1.74:1。
+ * 所以改成矩阵——前景和背景各自枚举，任意一对不达标就失败，
+ * 新增 token 时只要名字进清单就自动被覆盖，不依赖人记得补测。
+ *
+ * 比值的数学与「要测哪些色对」的清单放在 scripts/lib/contrast.mjs，
+ * 与 verify-docs.mjs 共用 —— 否则 README 里的对数与脚本各记一份，必然漂移。
+ *
+ * 用法：node scripts/verify-theme.mjs [--markdown]
  */
 
 import { spawn } from 'node:child_process';
@@ -19,6 +29,16 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  ALL_VARS,
+  blend,
+  chroma,
+  computeMatrix,
+  contrast,
+  luminance,
+  parseRGB,
+} from './lib/contrast.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -109,13 +129,7 @@ async function inspect(theme) {
 
   await new Promise((r) => setTimeout(r, 2200));
 
-  const vars = [
-    '--bg-base', '--bg-surface', '--bg-sunken', '--bg-raised', '--bg-overlay',
-    '--border-subtle', '--border-default', '--border-strong',
-    '--text-primary', '--text-secondary', '--text-tertiary',
-    '--accent', '--accent-text', '--accent-contrast', '--switch-knob',
-    '--success', '--warning', '--danger', '--terminal-command', '--terminal-success',
-  ];
+  const vars = ALL_VARS;
 
   const expr = `(() => {
     const pick = (sel) => {
@@ -144,68 +158,7 @@ async function inspect(theme) {
   return result.result.value;
 }
 
-/** 解析 #rgb / #rrggbb / #rrggbbaa / rgb() / rgba() 三种写法 */
-const parseRGB = (s) => {
-  if (typeof s !== 'string') return null;
-  const v = s.trim();
-
-  if (v.startsWith('#')) {
-    const hex = v.slice(1);
-    if (hex.length === 3) {
-      return {
-        r: parseInt(hex[0] + hex[0], 16),
-        g: parseInt(hex[1] + hex[1], 16),
-        b: parseInt(hex[2] + hex[2], 16),
-        a: 1,
-      };
-    }
-    if (hex.length === 6 || hex.length === 8) {
-      return {
-        r: parseInt(hex.slice(0, 2), 16),
-        g: parseInt(hex.slice(2, 4), 16),
-        b: parseInt(hex.slice(4, 6), 16),
-        a: hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1,
-      };
-    }
-    return null;
-  }
-
-  const m = v.match(/(\d+(?:\.\d+)?)/g);
-  if (!m) return null;
-  return { r: +m[0], g: +m[1], b: +m[2], a: m[3] === undefined ? 1 : +m[3] };
-};
-
-/** 色度：RGB 最大值与最小值之差。0 表示纯中性灰 */
-const chroma = ({ r, g, b }) => Math.max(r, g, b) - Math.min(r, g, b);
-
-const luminance = ({ r, g, b }) => {
-  const f = (c) => {
-    const v = c / 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-};
-
-const contrast = (a, b) => {
-  const l1 = luminance(a);
-  const l2 = luminance(b);
-  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
-  return (hi + 0.05) / (lo + 0.05);
-};
-
-/** 半透明前景压到背景上，换算成实际可见色再算对比度 */
-const blend = (fg, bg) =>
-  fg.a >= 1
-    ? fg
-    : {
-        r: Math.round(fg.r * fg.a + bg.r * (1 - fg.a)),
-        g: Math.round(fg.g * fg.a + bg.g * (1 - fg.a)),
-        b: Math.round(fg.b * fg.a + bg.b * (1 - fg.a)),
-        a: 1,
-      };
-
-/** 语义色允许带色相，其余必须是中性灰 */
-const SEMANTIC = /success|warning|danger|terminal-command|terminal-success/;
+const SEMANTIC = /success|warning|danger|stderr/;
 /** 色度上限：超过 12/255 就已经肉眼可辨为有彩色 */
 const CHROMA_LIMIT = 12;
 
@@ -242,16 +195,18 @@ for (const theme of ['dark', 'light']) {
     }
   }
 
-  // 3. 对比度
+  // 3. 对比度矩阵
   const pageBg = parseRGB(data.body.bg);
   const cardBg = parseRGB(data.card.bg);
-  const pairs = [
+
+  // 3a. DOM 实测：真实元素上的计算值，兜住「token 换了但选择器没跟上」
+  const domPairs = [
     ['正文 / 页面背景', parseRGB(data.body.color), pageBg],
     ['导航文字 / 侧边栏', parseRGB(data.navText.color), parseRGB(data.sidebar.bg)],
     ['卡片标题 / 卡片背景', parseRGB(data.card.color), cardBg],
     ['主按钮文字 / 按钮底色', parseRGB(data.primaryBtn.color), parseRGB(data.primaryBtn.bg)],
   ];
-  for (const [label, fg, bg] of pairs) {
+  for (const [label, fg, bg] of domPairs) {
     if (!fg || !bg) {
       problems.push(`${label} 取色失败`);
       continue;
@@ -260,13 +215,30 @@ for (const theme of ['dark', 'light']) {
     if (ratio < 4.5) problems.push(`${label} 对比度 ${ratio.toFixed(2)}:1，低于 AA 4.5:1`);
   }
 
-  results.push({ theme, problems });
+  // 3b. token 矩阵：清单来自共享模块，前景 × 背景逐对算
+  const measured = computeMatrix(data.vars, theme);
+  for (const m of measured) {
+    if (m.ratio === null) {
+      problems.push(`${m.fgName} 在 ${m.bgName} 上取色失败`);
+      continue;
+    }
+    if (m.ratio < m.need) {
+      const where = m.label ?? `${m.fgName} 在 ${m.bgName} 上`;
+      problems.push(`${where}对比度 ${m.ratio.toFixed(2)}:1，低于 AA ${m.need}:1`);
+    }
+  }
+
+  results.push({ theme, problems, measured });
 }
 
 /* ─────────────── 输出 ─────────────── */
 
+const MARKDOWN = process.argv.includes('--markdown');
+
 let failed = 0;
-for (const { theme, problems } of results) {
+let total = 0;
+for (const { theme, problems, measured } of results) {
+  total += measured.length;
   const label = theme === 'dark' ? '深色' : '浅色';
   console.log(`\n${label}主题`);
   if (problems.length === 0) {
@@ -276,6 +248,26 @@ for (const { theme, problems } of results) {
     for (const p of problems) console.log(`  ✗ ${p}`);
   }
 }
+
+console.log(`\n对比度实测：${total} 对色，${failed} 项不达标。`);
+
+/* README 用的表格：--markdown 时输出，数字全部来自上面同一批实测值，
+   不允许手写，改色后重跑一次脚本粘贴即可。 */
+if (MARKDOWN) {
+  const short = (n) => n.replace(/^--/, '');
+  for (const { theme, measured } of results) {
+    console.log(`\n<!-- ${theme} -->`);
+    console.log('| 前景 | 背景 | 实测 | 门槛 | 判定 |');
+    console.log('|---|---|---|---|---|');
+    for (const m of measured) {
+      const ok = m.ratio >= m.need ? '✓' : '✗';
+      console.log(
+        `| \`${short(m.fgName)}\` | \`${short(m.bgName)}\` | ${m.ratio.toFixed(2)}:1 | ${m.need}:1 | ${ok} |`,
+      );
+    }
+  }
+}
+
 console.log(failed === 0 ? '\n配色约束全部满足。' : `\n${failed} 项不满足。`);
 
 server.close();

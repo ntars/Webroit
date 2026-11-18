@@ -112,7 +112,7 @@
   height: 32px;
   padding: 0 var(--space-3);
   background: var(--bg-sunken);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: var(--text-base);
@@ -124,7 +124,9 @@
 
 .input:hover:not(:disabled),
 .select:hover:not(:disabled) {
-  border-color: var(--border-strong);
+  /* 不能再用 --border-strong：深色下它比常态的 --border-control 更暗，
+     hover 反而看起来像被禁用。用强调色才是明确的「这里可以操作」。 */
+  border-color: var(--accent);
 }
 
 .input:focus,
@@ -190,7 +192,7 @@ textarea.input {
   width: 38px;
   height: 22px;
   border-radius: var(--radius-full);
-  background: var(--border-strong);
+  background: var(--switch-track-off);
   transition: background var(--duration-normal) var(--ease-out);
   cursor: pointer;
 }

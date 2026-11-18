@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 57 source files, 15,225 lines (CSS and tests included) |
-| Artifact size | 460 KB across 12 files; first paint roughly 55 KB gzipped |
+| Code size | 57 source files, 15,244 lines (CSS and tests included) |
+| Artifact size | 461 KB across 12 files; first paint roughly 56 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -462,7 +462,9 @@ Backgrounds, text, borders and the accent colour all come from a neutral grey sc
 | Raised | `#252525` | `#ffffff` |
 | Primary text | `#ececec` | `#191919` |
 | Secondary text | `#b3b3b3` | `#4a4a4a` |
+| Tertiary text | `#949494` | `#656565` |
 | Border | `#3a3a3a` | `#d8d8d8` |
+| Control border | `#7c7c7c` | `#838383` |
 | Accent (solid) | `#ececec` with `#191919` text | `#191919` with `#ffffff` text |
 
 Two trade-offs:
@@ -470,7 +472,27 @@ Two trade-offs:
 1. **The accent colour is itself grey.** In dark mode the accent is light grey with dark text; in light mode it inverts. Buttons, selection states and progress bars get their focus from this inversion, not from blue.
 2. **Semantic colours keep very low saturation.** Success / warning / danger still use green / amber / red, because those three encode state rather than brand — going fully grey would make "command failed" and "operation succeeded" visually indistinguishable. Their saturation is pushed down to just enough to read as a hue.
 
-The constraint is machine-checked by `npm run verify:theme`: it verifies that every non-semantic token is close to zero chroma, that the accent direction is inverted relative to the theme, and that text and button contrast meets WCAG AA 4.5:1. Run it after touching colours instead of judging by eye whether a hue crept in.
+**Why the control border is its own step**: `--border-default` is translucent white, which over the input's `#101010` fill measures only 1.84:1 — the control edge is effectively invisible; and `--border-strong` is *darker* than it in dark mode, so hover reads as disabled. WCAG 1.4.11 requires interactive controls to reach 3:1 against adjacent colours, so `--border-control` exists solely for form controls rather than darkening the global border for the sake of one input.
+
+### 5.11b Measured Contrast (WCAG AA)
+
+All 80 colour pairs pass. The numbers are produced live by `npm run verify:theme -- --markdown`, not written by hand. Below is the tightest pair per token (the overlay `--bg-overlay` is the lightest background in dark mode):
+
+| Foreground | Dark min | Light min | Threshold |
+|---|---|---|---|
+| `--text-primary` | 11.82:1 | 14.09:1 | 4.5:1 |
+| `--text-secondary` | 6.66:1 | 7.10:1 | 4.5:1 |
+| `--text-tertiary` | 4.60:1 | 4.67:1 | 4.5:1 |
+| `--success` | 6.70:1 | 4.94:1 | 4.5:1 |
+| `--warning` | 6.61:1 | 4.74:1 | 4.5:1 |
+| `--danger` | 4.82:1 | 4.96:1 | 4.5:1 |
+| `--terminal-info` | 5.51:1 | 5.68:1 | 4.5:1 |
+| `--accent-contrast` on `--accent` | 14.88:1 | 17.58:1 | 4.5:1 |
+| `#ffffff` on `--danger-solid` | 5.44:1 | 6.19:1 | 4.5:1 |
+| `--border-control` on `--bg-sunken` | 4.56:1 | 3.04:1 | 3:1 |
+| `--switch-knob` on `--switch-track-off` | 4.25:1 | 3.36:1 | 3:1 |
+
+The constraint is machine-checked by `npm run verify:theme`: it verifies that every non-semantic token is close to zero chroma, that the accent direction is inverted relative to the theme, and that every pair in the matrix above passes. Early on it only measured 4 pairs, leaving `--text-tertiary`, the semantic colours, the terminal palette and the control border unchecked — and that blind spot hid two real defects (light-mode tertiary text at 3.90:1, light-mode switch knob against its off-track at 1.74:1). It is now a matrix: foregrounds and backgrounds are enumerated independently, any failing pair fails the run, and a new token is covered as soon as it is added to the list.
 
 ### 5.12 Dangerous Buttons Are Not Primary
 
@@ -654,7 +676,7 @@ npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 
 
 `verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
 
-`verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and whether text/nav/button contrast meets WCAG AA. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
+`verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and a full foreground × background contrast matrix (80 pairs, including the terminal palette, accent-on-fill inversion, control border and switch at the 3:1 threshold). Passing `-- --markdown` also prints two ready-to-paste measurement tables generated from the same run, so recolouring means re-running the script rather than transcribing by hand. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
 
 `verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × five states (collapsed, expanded, modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
 

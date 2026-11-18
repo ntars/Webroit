@@ -92,10 +92,18 @@
   --border-subtle: rgba(255, 255, 255, 0.10);
   --border-default: rgba(255, 255, 255, 0.15);
   --border-strong: #3a3a3a;
+  /*
+   * 表单控件的边框。--border-default 是半透明白，压在 #101010 的输入框
+   * 底色上只剩 1.84:1，控件边界等于看不见。WCAG 1.4.11 要求可交互控件
+   * 与其相邻颜色至少 3:1，这里单独取一个不透明灰承担这件事，避免为了
+   * 一个表单把全局的 --border-default 一起加重。
+   */
+  --border-control: #7c7c7c;
 
+  /* 三级文字必须在所有层级的背景上都达到 4.5:1，最亮的一层是弹层 #2c2c2c */
   --text-primary: #ececec;
   --text-secondary: #b3b3b3;
-  --text-tertiary: #8a8a8a;
+  --text-tertiary: #949494;
   --text-inverse: #191919;
 
   --accent: #ececec;
@@ -139,6 +147,8 @@
 
   /* 开关关闭态的滑块：在 #3a3a3a 轨道上仍需可辨，取中灰 */
   --switch-knob: #9e9e9e;
+  /* 开关关闭态的轨道 */
+  --switch-track-off: #3a3a3a;
 }
 
 /* ─────────────── 浅色 ─────────────── */
@@ -162,10 +172,12 @@
   --border-subtle: rgba(0, 0, 0, 0.08);
   --border-default: #d8d8d8;
   --border-strong: #c4c4c4;
+  /* 同深色主题：控件边框要能自己立住，不能借 --border-default */
+  --border-control: #838383;
 
   --text-primary: #191919;
   --text-secondary: #4a4a4a;
-  --text-tertiary: #7f7f7f;
+  --text-tertiary: #656565;
   --text-inverse: #fcfcfc;
 
   --accent: #191919;
@@ -175,15 +187,17 @@
   --accent-contrast: #ffffff;
   --selection: #cfcfcf;
 
-  --success: #0f7a45;
-  --success-subtle: rgba(15, 122, 69, 0.09);
+  /* 浅色 --success 原为 #0f7a45，在 sunken 底（#e6e6e6）上只有 4.33:1，
+     压到 #0d703f 后四层背景的最低值 4.94:1，仍保持同一绿色相。 */
+  --success: #0d703f;
+  --success-subtle: rgba(13, 112, 63, 0.09);
   --warning: #8a5a12;
   --warning-subtle: rgba(138, 90, 18, 0.09);
   --danger: #b3312c;
   --danger-subtle: rgba(179, 49, 44, 0.08);
   --danger-solid: #b3312c;
 
-  --success-line: rgba(15, 122, 69, 0.24);
+  --success-line: rgba(13, 112, 63, 0.24);
   --warning-line: rgba(138, 90, 18, 0.24);
   --danger-line: rgba(179, 49, 44, 0.22);
   --accent-line: rgba(0, 0, 0, 0.18);
@@ -198,9 +212,12 @@
   --terminal-text: #2e2e2e;
   --terminal-command: #191919;
   --terminal-stderr: #b3312c;
-  --terminal-info: #7f7f7f;
-  --terminal-success: #0f7a45;
+  --terminal-info: #656565;
+  --terminal-success: #0d703f;
 
   /* 开关关闭态的滑块：浅色轨道 #c4c4c4 上取纯白，与开态形成明暗互换 */
   --switch-knob: #ffffff;
+  /* 开关关闭态的轨道：原用 #c4c4c4，白滑块压上去只有 1.74:1，
+     关态看起来像个没有内容的灰胶囊，取深一档让滑块轮廓成立 */
+  --switch-track-off: #8c8c8c;
 }

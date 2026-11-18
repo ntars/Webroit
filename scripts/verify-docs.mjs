@@ -18,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 
+import { MATRIX, computeMatrix, parseTokens } from './lib/contrast.mjs';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const README = join(ROOT, 'README.md');
 const README_EN = join(ROOT, 'README_EN.md');
@@ -308,6 +310,76 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
 
     if (t.passed !== t.total) fail('单元测试全部通过', `${t.passed}/${t.total}`, '全部通过');
     else pass('单元测试全部通过', `${t.passed}/${t.total}（${t.files} 个文件）`);
+  }
+}
+
+// 5b. 配色对比度：直接从 tokens.css 重算，核对 README 的色值表与对数
+{
+  const css = readFileSync(join(ROOT, 'src/ui/theme/tokens.css'), 'utf8');
+  const tokens = parseTokens(css);
+  if (!tokens.dark || !tokens.light) {
+    fail('tokens.css 可解析', '深浅两套主题', '至少一套未解析出');
+  } else {
+    const all = [
+      ...computeMatrix(tokens.dark, 'dark'),
+      ...computeMatrix(tokens.light, 'light'),
+    ];
+    const bad = all.filter((m) => m.ratio === null || m.ratio < m.need);
+
+    // 色对总数：README 中英文里每一处「N 对色 / N colour pairs」都必须等于实际枚举数
+    // 只认「N 对色全部达标」与「N 对色，含…」这两种当前生效的表述；
+    // 「早期只测 4 对色」是历史叙述，不该被当成现在的数量，故排除。
+    const zhCounts = [
+      ...readme.matchAll(/(\d+) 对色全部达标/g),
+      ...readme.matchAll(/矩阵（(\d+) 对色，/g),
+    ].map((m) => Number(m[1]));
+    const enCounts = [...readmeEn.matchAll(/(\d+) colour pairs (?:pass|,)/g)].map((m) => Number(m[1]));
+    const allCounts = [...zhCounts, ...enCounts];
+    if (allCounts.length === 0) {
+      fail('README 对比度对数条目', MATRIX.count, null, '未找到「N 对色」');
+    } else if (allCounts.every((n) => n === MATRIX.count) && all.length === MATRIX.count) {
+      pass('对比度色对数', `${MATRIX.count}（中文 ${zhCounts.length} 处 + 英文 ${enCounts.length} 处，均一致）`);
+    } else {
+      fail('对比度色对数', MATRIX.count, allCounts.join(' / '));
+    }
+
+    bad.length === 0
+      ? pass('对比度全部达标', `${all.length} 对色均 ≥ 各自门槛`)
+      : fail('对比度不达标', bad.length, 0, bad.map((b) => `${b.theme}/${b.fgName}:${b.ratio?.toFixed(2)}`).join(' '));
+
+    // README 表格里的每个具体比值都必须与重算结果一致
+    const rowRe = /\|\s*`(--[a-z-]+|#[0-9a-fA-F]{6})`(?: on `(--[a-z-]+)`)?\s*\|\s*([\d.]+):1\s*\|\s*([\d.]+):1\s*\|\s*([\d.]+):1\s*\|/g;
+    let row;
+    let checked = 0;
+    const mismatched = [];
+    while ((row = rowRe.exec(readme))) {
+      const fg = row[1];
+      const bg = row[2] ?? null;
+      const darkDoc = Number(row[3]);
+      const lightDoc = Number(row[4]);
+      // 表里取的是「最紧的一对」：某前景在全部背景中的最小比值
+      const pick = (theme) => {
+        const rows = all.filter(
+          (m) => m.theme === theme && m.fgName === fg && (bg ? m.bgName === bg : true),
+        );
+        if (!rows.length) return null;
+        return Math.min(...rows.map((m) => m.ratio));
+      };
+      const d = pick('dark');
+      const l = pick('light');
+      if (d === null || l === null) continue;
+      checked++;
+      if (d.toFixed(2) !== darkDoc.toFixed(2) || l.toFixed(2) !== lightDoc.toFixed(2)) {
+        mismatched.push(`${fg} 文档 ${darkDoc}/${lightDoc} 实测 ${d.toFixed(2)}/${l.toFixed(2)}`);
+      }
+    }
+    if (checked < 8) {
+      fail('README 对比度表格行数', '≥8', checked, '表格缺失或被改写');
+    } else if (mismatched.length) {
+      fail('README 对比度表格数值', '与实测一致', mismatched.length, mismatched.join('；'));
+    } else {
+      pass('README 对比度表格', `${checked} 行与实测一致`);
+    }
   }
 }
 
