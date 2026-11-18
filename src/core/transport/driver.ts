@@ -249,22 +249,34 @@ export class Driver implements DeviceDriver {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    let failed = false;
+    // 不把收尾放在 finally 里抛错：finally 中的 throw 会覆盖 try 里的原始异常，
+    // 让真正的失败原因（例如设备拔线）被一句「dispose 失败」盖掉。
+    // 这里先把结果收进变量，收尾做完再决定抛哪个错。
+    let result: { ok: true; value: T } | { ok: false; error: unknown };
     try {
       checkAbort(signal);
-      return await Promise.race([work(sync), aborted]);
+      result = { ok: true, value: await Promise.race([work(sync), aborted]) };
     } catch (error) {
-      failed = true;
-      throw error;
-    } finally {
-      signal?.removeEventListener('abort', onAbort);
-      this.#sessions.delete(sync);
-      try {
-        await sync.dispose();
-      } catch (error) {
-        if (!failed) throw error;
-      }
+      result = { ok: false, error };
     }
+
+    signal?.removeEventListener('abort', onAbort);
+    this.#sessions.delete(sync);
+
+    let disposeError: unknown;
+    let disposeFailed = false;
+    try {
+      await sync.dispose();
+    } catch (error) {
+      disposeError = error;
+      disposeFailed = true;
+    }
+
+    // 主操作失败 → 原样抛出原始错误，释放阶段的错误只作旁支忽略（它多半是同一个原因引起的）；
+    // 主操作成功但释放失败 → 数据可能没刷进设备，必须让调用方知道，抛释放错误。
+    if (!result.ok) throw result.error;
+    if (disposeFailed) throw disposeError;
+    return result.value;
   }
 
   /** 推送本地文件到设备 */

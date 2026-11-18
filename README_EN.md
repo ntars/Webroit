@@ -631,6 +631,8 @@ With no device available, open `dev-preview.html` to browse the interface agains
 ### 7.3 Production Build
 
 ```bash
+npm run typecheck  # tsc once for the browser side, once for the Node side
+npm run lint       # ESLint 9 flat config, with no-explicit-any enabled
 npm run build      # tsc --noEmit → vite build → inject Service Worker
 npm run preview    # preview the build output locally
 ```
@@ -1297,9 +1299,9 @@ Stated plainly so contributors are not frustrated after following the documentat
    | `selected` and the error check in `connectUsb()` | 2 | `AdbDaemonWebUsbDevice.connect()` returns a value from the same `stream-extra` system, and the error branch has to match the runtime `name` field on an error class that exports no type |
 
    All three groups hit the same wall: **`stream-extra`'s `ReadableStream` is not assignable to the DOM `ReadableStream`**. v0.1 did try replacing every `any` with `import type`; `tsc` immediately reported type mismatches at 12 stream-handling call sites. This is not laziness — it is how those packages are typed. Fixing it properly means migrating the entire transport layer's streams onto `stream-extra`'s types, which is a v0.2 refactor.
-2. **There is no ESLint configuration.** A `lint` script remains in `package.json`, but no eslint dependency is installed and no configuration file exists, so it fails if executed. The rule "the UI layer must not import `@yume-chan/adb`" is currently maintained by layering conventions and code review, not enforced by tooling.
+2. ~~No ESLint configuration~~ — **now in place.** The root `eslint.config.js` uses ESLint 9's flat config on top of `typescript-eslint`'s recommended set, and pins `no-explicit-any` to error: `driver.ts` is exempted for the type-system reasons in point 1, while `any` anywhere else fails `npm run lint`. The rule "the UI layer must not import `@yume-chan/adb`" is still held by layering conventions rather than a custom lint rule.
 
-Both items are on the technical debt list before v0.2.
+The `any` cleanup is still on the technical debt list before v0.2.
 
 ---
 

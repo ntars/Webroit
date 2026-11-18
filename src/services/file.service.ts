@@ -148,6 +148,8 @@ export class FileService {
     if (!String(remotePath).startsWith('/')) {
       throw new Error('手机路径必须以 / 开头');
     }
+    // 拒绝 NUL 与换行：这两类字符会让 shell 命令被截断或注入第二条命令。
+    // eslint-disable-next-line no-control-regex
     if (/[\u0000\r\n]/.test(remotePath)) {
       throw new Error('手机路径包含非法字符');
     }
@@ -227,7 +229,8 @@ export class FileService {
     const entries: { name: string; size: number; dir: boolean }[] = [];
     for (const line of text.split(/\r?\n/)) {
       // ls -la 每行形如：drwxr-xr-x 2 root root 4096 2026-11-15 14:00 folder
-      const match = line.match(/^([\-dl])\S*\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/);
+      // 字符组里的 - 放在首位即表示字面量连字符，无需转义。
+      const match = line.match(/^([-dl])\S*\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/);
       if (!match) continue;
       const name = match[3].trim();
       if (name === '.' || name === '..') continue;

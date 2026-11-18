@@ -40,6 +40,9 @@ export function assertInteger(value: unknown, min: number, max: number, label = 
 /** 文件名消毒：去掉各平台非法字符，限制长度 */
 export function safeFileName(value: unknown, fallback = 'file'): string {
   const name = String(value ?? '')
+    // 这里的控制字符范围是刻意写死的：文件名消毒本来就要吃掉 \u0000-\u001f，
+    // 不是笔误，所以对本行关闭 no-control-regex。
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
     .slice(0, 160);
   return name || fallback;

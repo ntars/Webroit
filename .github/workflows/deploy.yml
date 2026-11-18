@@ -43,6 +43,12 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
+      - name: 代码规范检查
+        # 与 typecheck 互补：tsc 管类型，eslint 管「类型正确但写错了」的问题
+        # （显式 any、未使用的变量、正则里的控制字符等）。
+        # 规则见根目录 eslint.config.js，no-explicit-any 为 error。
+        run: npm run lint
+
       - name: 构建命令行
         # 打包 bin/ 并顺带重新生成 Skill 参数文档。
         # 这一步同时是一次冒烟测试：命令行包一旦引用了浏览器专属 API

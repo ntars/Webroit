@@ -635,6 +635,8 @@ npm run dev
 ### 7.3 生产构建
 
 ```bash
+npm run typecheck  # 浏览器侧与 Node 侧各跑一次 tsc
+npm run lint       # ESLint 9 扁平配置，含 no-explicit-any
 npm run build      # tsc --noEmit → vite build → 注入 Service Worker
 npm run preview    # 本地预览构建产物
 ```
@@ -1301,9 +1303,9 @@ v0.2 之前的**技术债清单**（优先于新功能）：
    | `connectUsb()` 的 `selected` 与错误判定 | 2 | `AdbDaemonWebUsbDevice` 的 `connect()` 返回值类型同样是 `stream-extra` 体系；错误分支要匹配运行时的 `name` 字段，而该错误类没有对外导出的类型 |
 
    这三类的共同点是**都卡在 `stream-extra` 的 `ReadableStream` 与 DOM `ReadableStream` 不兼容**这一点上。v0.1 曾尝试用 `import type` 全部替换，`tsc` 立刻在 12 个流处理调用点报类型不匹配 —— 这不是懒，是那套包的类型设计使然。彻底解决需要把整个传输层的流全部换成 `stream-extra` 的类型，属于 v0.2 的重构项。
-2. **没有 ESLint 配置**。`package.json` 里保留了 `lint` 脚本，但未安装 eslint 依赖，也没有配置文件，执行会失败。「UI 层不得 import `@yume-chan/adb`」这条约束目前靠分层约定与 code review 维持，没有工具强制。
+2. ~~没有 ESLint 配置~~ —— **已补齐**。仓库根目录的 `eslint.config.js` 使用 ESLint 9 扁平配置，基于 `typescript-eslint` 的 recommended 规则集，并把 `no-explicit-any` 定为 error：`driver.ts` 因第四节所述的类型体系限制单独放行，其余源码出现 `any` 一律让 `npm run lint` 失败。「UI 层不得 import `@yume-chan/adb`」这条约束仍靠分层约定维持，尚未落成自定义规则。
 
-这两项都列入 v0.2 之前的技术债。
+`any` 的收敛仍列入 v0.2 之前的技术债。
 
 ---
 
