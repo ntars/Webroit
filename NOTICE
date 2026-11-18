@@ -1,0 +1,488 @@
+Webroit
+开源合规声明（NOTICE）
+================================================================================
+
+Copyright © 2026 星玖工作室 Ntarstudio. All Rights Reserved.
+
+本文件逐项披露「Webroit」使用的全部第三方软件组件，包含名称、版本、
+版权方、许可证、官方地址、在本项目中的用途与修改说明。
+
+版本号一律取自实际解析结果：全部 npm 依赖取自 `package-lock.json`
+（lockfileVersion 3，2026-11-15 由 npm 10.9.7 生成）与 `node_modules/`
+中各包自身的 `package.json`。重新生成依赖后本文件须同步更新。
+
+
+--------------------------------------------------------------------------------
+阅读说明
+--------------------------------------------------------------------------------
+
+数量口径
+
+  npm 包              25 个（运行时直接依赖 6 个 + 运行时传递依赖 4 个
+                      + 构建期依赖 15 个）
+  平台相关二进制        52 个条目（@esbuild/* 26 个 + @rollup/rollup-* 26 个）
+  随包分发的二进制      0 个
+  合计                25 个组件 + 52 个平台条目
+
+  计数按 `package-lock.json` 中 `node_modules/` 条目的实际解析结果统计。
+  平台相关二进制为同一组件的多平台副本，按 npm 规范只安装当前平台对应的
+  一个，其余标记为 optional，因此单列而不逐项展开。
+
+  构建期依赖不进入 `dist/` 产物、不随应用分发，单列于第三节。
+  其中 esbuild 同时服务于网页构建与命令行打包（`npm run build:cli`），
+  因此在 `package.json` 中显式声明为开发依赖而非依赖传递引入 ——
+  直接依赖它却只靠传递解析，一旦上游调整依赖树就会在没有预兆时构建失败。
+  本项目刻意保持依赖极简，未引入 UI 组件库、CSS 框架、图标库、字体文件、
+  工具函数库、统计 SDK 中的任何一类。
+
+许可证分布
+
+  MIT                22 个
+  ISC                 1 个（picocolors）
+  BSD-3-Clause        1 个（source-map-js）
+  Apache-2.0          1 个（typescript）
+
+  全部为宽松许可证（MIT / ISC / BSD-3-Clause / Apache-2.0），与项目自身的
+  Apache-2.0 / MIT 完全兼容，不存在许可证冲突。平台相关二进制均为 MIT。
+
+修改状态
+
+  全部 25 个组件均以未修改的发布版本引入。项目内不存在 `vendor/` 目录，
+  `package.json` 中不存在 `resolutions` / `overrides` / `patchedDependencies`
+  段，不存在 `patch-package` 补丁文件，不存在对 node_modules 的任何手工改写。
+  因此下文各项的「修改」一律为「无」。
+
+不包含的组件
+
+  本项目早期设计文档中提及的一些组件在当前版本中并不存在，特此说明，
+  避免审计时误认为已引入：
+
+  - scrcpy 与 scrcpy-server：投屏功能尚未实现，仓库与产物中均无此组件。
+  - @yume-chan/adb-scrcpy、@yume-chan/scrcpy、@yume-chan/android-bin：
+    同上，未安装。
+  - android-fastboot：Fastboot 功能尚未实现，未安装。
+  - @xterm/xterm、@xterm/addon-fit：终端为自研实现，未使用 xterm。
+  - vitest、@playwright/test：未配置自动化测试，未安装。
+
+
+--------------------------------------------------------------------------------
+一、运行时直接依赖（6 个）
+--------------------------------------------------------------------------------
+
+以下 6 个包随 `dist/` 产物分发给最终用户。
+
+1. @yume-chan/adb
+   版本      2.6.4
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      ADB 协议的 TypeScript 实现：连接握手、RSA 认证、流复用、
+             sync 文件传输协议
+   修改      无
+
+2. @yume-chan/adb-daemon-webusb
+   版本      2.3.2
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      WebUSB 传输后端，把 ADB 帧封装为 USB 批量传输
+   修改      无
+
+3. @yume-chan/adb-credential-web
+   版本      2.1.0
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      将 ADB RSA 密钥对持久化到 IndexedDB（库名 Tango），
+             避免每次连接都需重新授权
+   修改      无
+
+4. @yume-chan/stream-extra
+   版本      2.6.1
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      流处理工具（BufferedReadableStream、Consumable 等），
+             ADB 命令输出读取依赖此包
+   修改      无
+
+5. @yume-chan/struct
+   版本      2.3.2
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      二进制结构体序列化与反序列化，用于构造 ADB 协议帧
+   修改      无
+
+6. preact
+   版本      10.29.8
+   版权方    Copyright (c) 2015-present Jason Miller
+   许可证    MIT
+   地址      https://github.com/preactjs/preact
+   用途      UI 运行时，提供与 React 同构的组件与 hooks API
+   修改      无
+
+
+--------------------------------------------------------------------------------
+二、运行时传递依赖（4 个）
+--------------------------------------------------------------------------------
+
+以下 4 个包不直接被本项目 import，由第一节的包引入，同样随产物分发。
+
+7. @yume-chan/async
+   版本      4.2.2
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/async
+   用途      异步资源管理工具（AutoDisposable、PromiseResolver 等）
+   引入者    @yume-chan/adb
+   修改      无
+
+8. @yume-chan/event
+   版本      2.0.0
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      事件派发器（EventEmitter、EventDispatcher）
+   引入者    @yume-chan/adb
+   修改      无
+
+9. @yume-chan/no-data-view
+   版本      2.0.0
+   版权方    Copyright (c) 2020-2025 Simon Chan
+   许可证    MIT
+   地址      https://github.com/yume-chan/ya-webadb
+   用途      零拷贝的字节视图操作，减少大文件传输时的内存复制
+   引入者    @yume-chan/adb
+   修改      无
+
+10. @types/w3c-web-usb
+    版本      1.0.14
+    版权方    Copyright (c) Microsoft Corporation
+    许可证    MIT
+    地址      https://github.com/DefinitelyTyped/DefinitelyTyped
+    用途      WebUSB API 的 TypeScript 类型声明
+    引入者    @yume-chan/adb-daemon-webusb
+    修改      无
+
+    说明      此包虽以 @types 前缀命名，但它是 @yume-chan/adb-daemon-webusb
+              的运行时依赖（列于 dependencies 而非 devDependencies），
+              因此归入运行时传递依赖而非构建期依赖。
+
+
+--------------------------------------------------------------------------------
+三、构建期依赖（15 个）
+--------------------------------------------------------------------------------
+
+以下组件仅在开发与构建时运行，不进入 `dist/` 产物，不随应用分发。
+仍按完整性原则一并列出。
+
+11. vite
+    版本      7.3.8
+    版权方    Copyright (c) 2019-present, VoidZero Inc. and Vite contributors
+    许可证    MIT
+    地址      https://github.com/vitejs/vite
+    用途      开发服务器与生产构建
+    修改      无
+
+12. typescript
+    版本      5.9.3
+    版权方    Copyright (c) Microsoft Corporation
+    许可证    Apache-2.0
+    地址      https://github.com/microsoft/TypeScript
+    用途      类型检查（tsc --noEmit），构建前置步骤
+    修改      无
+
+    说明      Apache-2.0 完整文本见
+              https://www.apache.org/licenses/LICENSE-2.0
+
+13. @types/node
+    版本      24.19.2
+    版权方    Copyright (c) Microsoft Corporation
+    许可证    MIT
+    地址      https://github.com/DefinitelyTyped/DefinitelyTyped
+    用途      Node.js API 的 TypeScript 类型声明
+    修改      无
+
+14. esbuild
+    版本      0.28.2
+    版权方    Copyright (c) 2020 Evan Wallace
+    许可证    MIT
+    地址      https://github.com/evanw/esbuild
+    用途      Vite 内置的 TypeScript / JSX 转换器
+    修改      无
+
+15. rollup
+    版本      4.68.3
+    版权方    Copyright (c) 2017 Rich Harris and contributors
+    许可证    MIT
+    地址      https://github.com/rollup/rollup
+    用途      Vite 内置的生产打包器
+    修改      无
+
+16. postcss
+    版本      8.5.33
+    版权方    Copyright 2013 Andrey Sitnik <andrey@sitnik.es>
+    许可证    MIT
+    地址      https://github.com/postcss/postcss
+    用途      CSS 处理管线，Vite 的样式处理依赖
+    修改      无
+
+17. nanoid
+    版本      3.3.20
+    版权方    Copyright 2017 Andrey Sitnik <andrey@sitnik.ru>
+    许可证    MIT
+    地址      https://github.com/ai/nanoid
+    用途      Vite 内部的短 ID 生成
+    修改      无
+
+18. picocolors
+    版本      1.1.1
+    版权方    Copyright (c) 2021-2024 Oleksii Raspopov, Kostiantyn Denysov,
+              Anton Verinov
+    许可证    ISC
+    地址      https://github.com/alexeyraspopov/picocolors
+    用途      终端输出着色
+    修改      无
+
+19. picomatch
+    版本      4.0.7
+    版权方    Copyright (c) 2017-present, Jon Schlinkert
+    许可证    MIT
+    地址      https://github.com/micromatch/picomatch
+    用途      glob 模式匹配
+    修改      无
+
+20. fdir
+    版本      6.5.0
+    版权方    Copyright 2023 Abdullah Atta
+    许可证    MIT
+    地址      https://github.com/thecodrr/fdir
+    用途      高性能目录遍历
+    修改      无
+
+21. tinyglobby
+    版本      0.2.17
+    版权方    Copyright (c) 2024 Madeline Gurriarán
+    许可证    MIT
+    地址      https://github.com/SuperchupuDev/tinyglobby
+    用途      轻量 glob 实现
+    修改      无
+
+22. source-map-js
+    版本      1.2.2
+    版权方    Copyright (c) 2009-2011, Mozilla Foundation and contributors
+    许可证    BSD-3-Clause
+    地址      https://github.com/7rulnik/source-map-js
+    用途      Source Map 解析与生成
+    修改      无
+
+    说明      BSD-3-Clause 完整文本见
+              https://opensource.org/licenses/BSD-3-Clause
+
+23. fsevents
+    版本      2.3.3
+    版权方    Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis,
+              Elan Shankar, Paul Miller
+    许可证    MIT
+    地址      https://github.com/fsevents/fsevents
+    用途      macOS 原生文件系统事件监听，仅 Darwin 平台安装
+    修改      无
+
+24. @types/estree
+    版本      1.0.10
+    版权方    Copyright (c) Microsoft Corporation
+    许可证    MIT
+    地址      https://github.com/DefinitelyTyped/DefinitelyTyped
+    用途      ESTree AST 的 TypeScript 类型声明
+    修改      无
+
+25. undici-types
+    版本      7.24.6
+    版权方    Copyright (c) Matteo Collina and Undici contributors
+    许可证    MIT
+    地址      https://github.com/nodejs/undici
+    用途      fetch / Web Streams 相关类型声明
+    修改      无
+
+
+--------------------------------------------------------------------------------
+四、平台相关可选二进制（52 个条目，均为 MIT）
+--------------------------------------------------------------------------------
+
+`esbuild` 与 `rollup` 各自提供 26 个平台专用的原生二进制包，作为 optional
+依赖声明，npm 按当前平台只实际安装其中一个。
+
+  家族                   条目数   版本     版权方              许可证
+  @esbuild/*              26     0.28.2   Evan Wallace         MIT
+  @rollup/rollup-*        26     4.68.3   Rich Harris          MIT
+
+覆盖平台与架构：aix-ppc64、android-arm / arm64 / x64、darwin-arm64 / x64、
+freebsd-arm64 / x64、linux-arm / arm64 / ia32 / loong64 / mips64el /
+ppc64 / riscv64 / s390x / x64、netbsd-x64、openharmony-arm64、
+openbsd-x64、sunos-x64、win32-arm64 / ia32 / x64。
+
+完整条目清单见仓库中的 `package-lock.json`（搜索 `@esbuild/` 与
+`@rollup/rollup-`）。
+
+
+--------------------------------------------------------------------------------
+五、第三方许可证全文
+--------------------------------------------------------------------------------
+
+依据 MIT、ISC、BSD-3-Clause 的条款要求，以下保留相应许可证的完整原文。
+Apache-2.0（TypeScript）的完整文本见其仓库内 LICENSE.txt，亦公开于
+https://www.apache.org/licenses/LICENSE-2.0 。
+
+
+--- MIT License（适用于本文件中 22 个组件） ---
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--- ISC License（适用于 picocolors） ---
+
+ISC License
+
+Copyright (c) 2021-2024 Oleksii Raspopov, Kostiantyn Denysov, Anton Verinov
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+
+--- BSD 3-Clause License（适用于 source-map-js） ---
+
+Copyright (c) 2009-2011, Mozilla Foundation and contributors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+--------------------------------------------------------------------------------
+六、本项目自身的许可
+--------------------------------------------------------------------------------
+
+Webroit 原创代码按目录分层授权，只使用 Apache-2.0 与 MIT 两种宽松许可证。
+分层路由表见仓库根目录 LICENSE，许可全文见 LICENSES/ 目录。
+
+    Copyright (c) 2026 星玖工作室 Ntarstudio
+
+    Apache-2.0 覆盖：src/services/、src/tools/、src/core/transport/
+    MIT 覆盖：src/core/ 其余、src/ui/、src/node/、bin/、scripts/
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+两种许可均无传染性：衍生作品可闭源、可商用，无需开放修改。
+
+「Webroit」名称、Logo 与界面设计归星玖工作室（Ntarstudio）所有，
+不在代码许可的授权范围内。
+
+
+--------------------------------------------------------------------------------
+七、不包含的内容
+--------------------------------------------------------------------------------
+
+以下类别在本项目中完全不存在，特此声明以便审计：
+
+1. 来源不明或未标注许可证的代码。本项目从零实现，未复制任何其他项目的
+   源代码片段。
+
+2. 复制的 README、文档、图片、文案。本文件与 README 均为原创撰写。
+
+3. 厂商 Logo、品牌素材。界面中出现的品牌名称（小米、OPPO、vivo、华为、
+   三星等）仅作为设备识别与功能分流的依据，不使用任何厂商的图形标识。
+
+4. 外部图标库、图标字体、webfont。全部图标为手写 SVG path，字体使用
+   系统字体栈（-apple-system、PingFang SC、Microsoft YaHei 等）。
+
+5. 用户数据的收集与上传。本项目无后端、无遥测、无崩溃上报。
+
+6. 绕过设备安全机制的功能。不提供 Bootloader 解锁、激活锁绕过、
+   屏幕锁绕过、一键 root 或任何类似的实现与协助。
+
+
+--------------------------------------------------------------------------------
+八、免责声明
+--------------------------------------------------------------------------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+本工具通过 ADB 协议直接操作 Android 设备，属于底层操作。任何操作都存在
+导致数据丢失、系统异常或设备无法开机的可能。使用者应在操作前备份重要
+数据，并自行承担由此产生的一切后果。作者与贡献者不对因使用本软件产生的
+任何直接或间接损失承担责任。
+
+
+================================================================================
+本文件最后更新：2026-11-15
+依赖版本核定依据：package-lock.json（lockfileVersion 3）
+核对方式：npm ci 后逐包读取 node_modules/<pkg>/package.json 的
+          version / license / author / repository 字段
+================================================================================

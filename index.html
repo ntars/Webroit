@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Webroit — 浏览器里的安卓设备管理</title>
+    <meta
+      name="description"
+      content="通过 WebUSB 在浏览器里直接连接安卓设备，无需安装软件，无需 root。应用管理、显示调节、文件传输、电池诊断全部在本地完成。"
+    />
+    <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ededed" media="(prefers-color-scheme: light)" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Webroit" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Webroit" />
+
+    <!-- 社交分享卡片 -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Webroit — 浏览器里的安卓设备管理" />
+    <meta
+      property="og:description"
+      content="插上数据线，打开网页，就能玩机。零安装、零驱动、零后端。"
+    />
+    <meta property="og:image" content="./icons/icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <noscript>
+      <div style="padding: 48px; font: 15px/1.7 system-ui; color: #b3b3b3; background: #141414">
+        <h1 style="font-size: 18px; color: #ececec; font-weight: 600">需要启用 JavaScript</h1>
+        <p>Webroit 通过 WebUSB 在浏览器内直接与设备通信，必须运行 JavaScript 才能使用。</p>
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

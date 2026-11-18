@@ -1,0 +1,37 @@
+{
+  "name": "webroit",
+  "private": true,
+  "version": "0.1.0-dev",
+  "type": "module",
+  "description": "插上数据线，打开网页，就能玩机 —— 浏览器内安卓玩机工具箱",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
+    "build:cli": "node scripts/build-cli.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "verify:docs": "node scripts/verify-docs.mjs",
+    "verify:theme": "node scripts/verify-theme.mjs",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@yume-chan/adb": "^2.6.4",
+    "@yume-chan/adb-credential-web": "^2.1.0",
+    "@yume-chan/adb-daemon-webusb": "^2.3.2",
+    "@yume-chan/stream-extra": "^2.6.1",
+    "@yume-chan/struct": "^2.3.2",
+    "preact": "^10.27.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
+  },
+  "bin": {
+    "webroit": "bin/webroit",
+    "webroit-mcp": "bin/webroit-mcp"
+  }
+}

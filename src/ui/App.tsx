@@ -1,0 +1,347 @@
+/**
+ * 应用外壳：侧边栏 + 主区域 + 终端抽屉。
+ *
+ * 布局用 CSS Grid 而非 flex，因为三块区域的高度关系需要明确约束：
+ * 主区域可滚动，侧边栏与终端固定。grid 的 1fr 比 flex 的 flex: 1
+ * 更不容易在内容溢出时把侧边栏挤变形。
+ */
+
+import { type FunctionComponent } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+
+import { type ModuleId, visibleModules } from '@/tools/registry';
+import { PREVIEW_CAPABILITIES } from '@/core/preview';
+import {
+  activeModule,
+  clearTerminal,
+  pendingUpdate,
+  phase,
+  preferences,
+  resetConnection,
+  session,
+  sidebarOpen,
+  switchModule,
+  terminalLines,
+  updatePreferences,
+} from '@/ui/state/app-state';
+import { useSignal } from '@/ui/state/signal';
+import { Terminal } from '@/ui/components/Terminal';
+import { InstallButton, UpdateBanner } from '@/ui/components/PwaPrompt';
+import { useConnect } from '@/ui/hooks/use-connect';
+import { ModuleView } from '@/ui/views/ModuleView';
+import { ConnectPanel } from '@/ui/views/ConnectPanel';
+import { EmergencyReset } from '@/ui/views/EmergencyReset';
+import { BrandBadge } from '@/ui/components/BrandBadge';
+
+/** 应急入口的 hash 标记 */
+const EMERGENCY_HASH = '#/reset-display';
+
+/**
+ * 判断当前是否进入应急重置页。
+ *
+ * 除了 `#/reset-display`，还认 `?reset-display` ——
+ * 有些用户会直接改查询串而不是 hash，两种都放行成本极低。
+ */
+function isEmergencyRoute(): boolean {
+  if (typeof location === 'undefined') return false;
+  if (location.hash === EMERGENCY_HASH) return true;
+  return new URLSearchParams(location.search).has('reset-display');
+}
+
+/** SVG 图标 */
+function Icon({ path, size = 16 }: { path: string; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d={path} />
+    </svg>
+  );
+}
+
+/**
+ * 未连接时的顶部提示条。
+ *
+ * 为什么是「条」而不是「整屏」：用户来这个站点的第一诉求是看清它能做什么，
+ * 而不是先被要求插线。整屏连接引导适合做落地页首屏，但会让访客在
+ * 看到任何功能之前就流失。所以判断放在这里 —— 浏览随便，执行再说。
+ */
+const ConnectStrip: FunctionComponent<{
+  supported: boolean;
+  busy: boolean;
+  message: string;
+  onConnect: () => void;
+  onShowGuide: () => void;
+}> = ({ supported, busy, message, onConnect, onShowGuide }) => (
+  <div class="connect-strip" data-warn={!supported}>
+    <div class="connect-strip__text">
+      {supported ? (
+        <>
+          <strong>当前未连接设备</strong>
+          <span>功能与参数都可以先看，执行操作时会提示连接。</span>
+        </>
+      ) : (
+        <>
+          <strong>当前浏览器不支持 WebUSB</strong>
+          <span>请改用 Chrome 或 Edge 桌面版，并通过 https 或 localhost 打开。</span>
+        </>
+      )}
+    </div>
+    <div class="connect-strip__actions">
+      <button type="button" class="btn btn--ghost btn--sm" onClick={onShowGuide}>
+        连接步骤
+      </button>
+      <button
+        type="button"
+        class="btn btn--primary btn--sm"
+        disabled={!supported || busy}
+        onClick={onConnect}
+      >
+        {busy ? (
+          <>
+            <span class="spinner" />
+            {message || '连接中…'}
+          </>
+        ) : (
+          '连接设备'
+        )}
+      </button>
+    </div>
+  </div>
+);
+
+export const App: FunctionComponent = () => {
+  const currentModule = useSignal(activeModule);
+  const currentPhase = useSignal(phase);
+  const currentSession = useSignal(session);
+  const prefs = useSignal(preferences);
+  const lines = useSignal(terminalLines);
+  const sidebarVisible = useSignal(sidebarOpen);
+  const updateHandler = useSignal(pendingUpdate);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const [emergency, setEmergency] = useState(isEmergencyRoute);
+  const [guide, setGuide] = useState(false);
+  const { connect, busy: connecting, message: connectMessage, supported } = useConnect();
+
+  // hash 变化要能切换页面 —— 用户在应急页点「返回主界面」时靠这个回到正常界面
+  useEffect(() => {
+    const sync = () => setEmergency(isEmergencyRoute());
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+
+  // 连接成功后自动滚到终端底部，让用户看到第一条命令输出
+  useEffect(() => {
+    const element = terminalRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [lines.length]);
+
+  const connected = currentPhase === 'ready' && currentSession !== null;
+
+  /*
+   * 分区列表在未连接时也完整给出。
+   *
+   * 老做法是未连接就只列通用分区、并禁用全部导航项 —— 结果是访客只能看到
+   * 一屏连接引导，完全不知道这个工具到底能做什么。现在改成：
+   * 导航全部可点，各分区照常渲染，读不到的数据由内联提示说明原因。
+   */
+  const modules = connected
+    ? visibleModules(currentSession!.capabilities)
+    : visibleModules(PREVIEW_CAPABILITIES, true);
+
+  // 应急页完全独立渲染，不套侧边栏与外框 ——
+  // 界面被撑大时，任何外层布局都可能把按钮挤出可视区
+  if (emergency) return <EmergencyReset />;
+
+  return (
+    <div class="app" data-sidebar={prefs.sidebarCollapsed ? 'collapsed' : 'expanded'}>
+      {/* ── 侧边栏 ── */}
+      <aside class="sidebar" data-open={sidebarVisible}>
+        <div class="sidebar__brand">
+          <div class="sidebar__logo" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <rect x="7" y="2" width="10" height="20" rx="2.5" stroke="currentColor" stroke-width="1.8" />
+              <path d="M10 19h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              <circle cx="12" cy="8" r="2.2" stroke="currentColor" stroke-width="1.6" />
+            </svg>
+          </div>
+          <div class="sidebar__title">
+            <span class="sidebar__name">Webroit</span>
+            <span class="sidebar__version">v0.1 开发版</span>
+          </div>
+        </div>
+
+        <nav class="sidebar__nav" aria-label="功能分区">
+          {modules.map((module) => (
+            <button
+              key={module.id}
+              type="button"
+              class="nav-item"
+              data-active={module.id === currentModule}
+              data-preview={!connected}
+              onClick={() => switchModule(module.id as ModuleId)}
+              title={module.description}
+            >
+              <span class="nav-item__icon">
+                <Icon path={module.icon} />
+              </span>
+              <span class="nav-item__text">{module.title}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div class="sidebar__footer">
+          {connected && currentSession ? (
+            <>
+              <BrandBadge />
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm btn--block"
+                onClick={() => {
+                  void currentSession.close().finally(() => resetConnection());
+                }}
+              >
+                断开连接
+              </button>
+            </>
+          ) : (
+            <div class="sidebar__connect">
+              <div class="sidebar__hint">
+                {supported ? '浏览不受限，执行操作时再连接' : '当前浏览器不支持 WebUSB'}
+              </div>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm btn--block"
+                disabled={!supported || connecting}
+                onClick={() => void connect()}
+              >
+                {connecting ? (
+                  <>
+                    <span class="spinner" />
+                    {connectMessage || '连接中…'}
+                  </>
+                ) : (
+                  '连接设备'
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* ── 主区域 ── */}
+      <main class="main">
+        <header class="titlebar">
+          <div class="titlebar__left">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm titlebar__menu"
+              onClick={() => sidebarOpen.set(!sidebarVisible)}
+              aria-label="切换侧边栏"
+            >
+              <Icon path="M4 6h16M4 12h16M4 18h16" />
+            </button>
+            <h1 class="titlebar__title">
+              {modules.find((module) => module.id === currentModule)?.title ?? 'Webroit'}
+            </h1>
+          </div>
+          <div class="titlebar__right">
+            <InstallButton />
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              onClick={() => updatePreferences({ theme: prefs.theme === 'dark' ? 'light' : 'dark' })}
+              title="切换明暗主题"
+            >
+              <Icon
+                path={
+                  prefs.theme === 'dark'
+                    ? 'M12 3v1m0 16v1M4.2 4.2l.7.7m14.2 14.2l.7.7M3 12h1m16 0h1M4.2 19.8l.7-.7M19.1 4.9l.7-.7M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z'
+                    : 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'
+                }
+              />
+            </button>
+          </div>
+        </header>
+
+        <div class="content">
+          <UpdateBanner onApply={updateHandler} />
+          {/*
+            未连接时在内容区顶部放一条窄提示，而不是把整屏换成连接引导。
+            访客可以直接往下浏览每个分区的功能与参数，只有真正要执行时才需要连接。
+          */}
+          {!connected && (
+            <ConnectStrip
+              supported={supported}
+              busy={connecting}
+              message={connectMessage}
+              onConnect={() => void connect()}
+              onShowGuide={() => setGuide(true)}
+            />
+          )}
+          <ModuleView module={currentModule} />
+        </div>
+
+        {/* ── 终端 ── */}
+        <section class="terminal-panel" data-collapsed={!connected}>
+          <div class="terminal-panel__header">
+            <span class="terminal-panel__label">命令输出</span>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              onClick={clearTerminal}
+              disabled={lines.length === 0}
+            >
+              清空
+            </button>
+          </div>
+          <div class="terminal-panel__body" ref={terminalRef}>
+            <Terminal
+              lines={lines}
+              fontSize={prefs.terminalFontSize}
+              showCommandEcho={prefs.showCommandEcho}
+            />
+          </div>
+        </section>
+      </main>
+
+      {/* 连接步骤：从提示条按需打开，不占用主浏览路径 */}
+      {guide && (
+        <div
+          class="guide-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="连接步骤"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setGuide(false);
+          }}
+        >
+          <div class="guide-sheet">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm guide-sheet__close"
+              onClick={() => setGuide(false)}
+              aria-label="关闭"
+            >
+              关闭
+            </button>
+            <ConnectPanel
+              onConnected={() => {
+                setGuide(false);
+                switchModule('device');
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

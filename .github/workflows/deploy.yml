@@ -1,0 +1,94 @@
+name: 部署到 GitHub Pages
+
+# 触发条件：
+# - main 分支有新提交时自动构建部署
+# - 允许在 Actions 页面手动触发，便于回滚后重发
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一时间只跑一个部署。cancel-in-progress 关掉：
+# 部署中途被打断会留下半成品站点，宁可排队等它跑完。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# GITHUB_TOKEN 的最小权限：读仓库、写 Pages、签发身份令牌
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: 构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          # 与开发环境保持一致，避免本地能过 CI 不过
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        # 用 ci 而非 install：严格按 package-lock.json 还原，
+        # 依赖版本漂移导致的「本地能构建、线上构建失败」由此排除
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建命令行
+        # 打包 bin/ 并顺带重新生成 Skill 参数文档。
+        # 这一步同时是一次冒烟测试：命令行包一旦引用了浏览器专属 API
+        # （document、localStorage 之类），打包能过但运行会挂；
+        # 所以下面还有一步真的把它跑起来。
+        run: npm run build:cli
+
+      - name: 冒烟测试命令行
+        # 验证三件事：能启动、能列出工具、无设备时降级正确。
+        # CI 里既没有真机也没有装 platform-tools，所以：
+        # - devices 允许返回 1（找不到 adb 是正确的降级），但不能崩出堆栈
+        # - run 必须失败退出（无设备时返回成功说明降级逻辑坏了）
+        run: |
+          ./bin/webroit tools --stats
+          ./bin/webroit devices || echo "（CI 无 adb，devices 返回非零属预期）"
+          if ./bin/webroit run display.read --json; then
+            echo "无设备时不应返回成功"; exit 1
+          fi
+          echo "冒烟测试通过"
+
+      - name: 构建
+        # build 脚本内部已包含 tsc --noEmit 与 Service Worker 注入
+        run: npm run build
+
+      - name: 校验文档与代码一致
+        # 放在 build 之后：这一步要读 dist/ 的真实产物体积来核对 README。
+        # 文档里的文件数、行数、gzip 数字一旦与代码不符就让部署失败，
+        # 避免线上站点带着过期的性能数据。
+        run: npm run verify:docs
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: 发布
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署
+        id: deployment
+        uses: actions/deploy-pages@v4

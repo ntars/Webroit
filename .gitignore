@@ -1,0 +1,37 @@
+# 忽略 macOS 资源叉与系统缓存
+.DS_Store
+._*
+__MACOSX/
+*.swp
+
+# 依赖与产物
+node_modules/
+dist/
+.vite/
+
+# 命令行产物：由 npm run build:cli 生成，不入库
+# 入库会让每次改代码都产生巨大的二进制 diff，也让仓库体积随构建波动
+bin/
+
+# 本地环境与密钥
+.env
+.env.local
+*.pem
+*.key
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# 内部文档：仅保留在本地，不纳入版本控制
+docs/
+
+# 构建与验证临时脚本
+# 只忽略仓库根目录下的临时脚本；scripts/ 里的正式脚本要入库，
+# 否则 CI 的 verify:docs 找不到文件直接失败。
+/*.tmp.mjs
+/*.tmp.js
+/*verify-*.mjs
+/*verify-*.js
+.workbuddy/
