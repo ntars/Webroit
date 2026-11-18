@@ -255,32 +255,37 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
   else pass('品牌数', 5);
 }
 
-// 4. any 分布
+// 4. any 分布：全仓零 any 是硬指标
 {
   const a = anyStats();
-  const driverAny = a.perFile.get('src/core/transport/driver.ts') ?? 0;
+  const declared = readme.match(/全仓 (\d+) 个 `?\.ts`? \/ `?\.tsx`? 文件、(\d+) 处 `any`/);
 
-  // 文档措辞：只有 driver.ts 用 any，共 N 处，其余 M 个文件零 any
-  const m = readme.match(/共 (\d+) 处`?/) ?? readme.match(/(\d+) 处 `any`/);
-  const m2 = readme.match(/其余 (\d+) 个文件零 `any`/);
+  // 每个文件都必须零 any；一旦有文件出现 any，直接点名
+  if (a.total === 0) {
+    pass('全仓零 any', `${a.files} 个文件`);
+  } else {
+    const detail = [...a.perFile.entries()].map(([f, n]) => `${f}: ${n}`).join('、');
+    fail('全仓零 any', detail, 0, '出现 any 请先修掉；确实无法修再加回例外并在文档说明');
+  }
 
-  if (!m) fail('driver any 处数声明', driverAny, null, '未找到「共 N 处」');
-  else if (Number(m[1]) === driverAny) pass('driver any 处数', driverAny);
-  else fail('driver any 处数', driverAny, Number(m[1]), '新增 any 要么修掉、要么同步文档');
+  // README 声明的「N 个文件、M 处 any」两个数都要与实际一致
+  if (!declared) {
+    fail('README 零 any 声明', '存在', null, '未找到「全仓 N 个 .ts / .tsx 文件、M 处 any」');
+  } else {
+    Number(declared[1]) === a.files
+      ? pass('源文件数（any 口径）', a.files)
+      : fail('源文件数（any 口径）', a.files, Number(declared[1]), 'README 写的是旧值');
+    Number(declared[2]) === a.total
+      ? pass('any 处数（文档一致）', a.total)
+      : fail('any 处数（文档一致）', a.total, Number(declared[2]));
+  }
 
-  if (!m2) fail('零 any 文件数声明', a.cleanFiles, null, '未找到「其余 N 个文件零 any」');
-  else if (Number(m2[1]) === a.cleanFiles) pass('零 any 文件数', a.cleanFiles);
-  else fail('零 any 文件数', a.cleanFiles, Number(m2[1]));
-
-  if (!/只有 `src\/core\/transport\/driver\.ts` 一个文件用了 `any`/.test(readme)) {
-    fail('any 仅限 driver.ts 的声明', '存在', null, '未找到该句');
-  } else if (a.total === driverAny) pass('any 仅存在于 driver.ts', a.total);
-  else {
-    const others = [...a.perFile.entries()]
-      .filter(([f]) => f !== 'src/core/transport/driver.ts')
-      .map(([f, n]) => `${f}: ${n}`)
-      .join('、');
-    fail('any 仅存在于 driver.ts', others || '无', '仅 driver.ts');
+  // 英文档同样要能核对
+  if (readmeEn) {
+    const en = readmeEn.match(/(\d+) `?\.ts`? \/ `?\.tsx`? files, (\d+) places? of `any`/);
+    if (!en) fail('README_EN 零 any 声明', '存在', null, '未找到「N .ts / .tsx files, M places of any」');
+    else if (Number(en[1]) === a.files && Number(en[2]) === a.total) pass('README_EN 零 any', `${a.files} / ${a.total}`);
+    else fail('README_EN 零 any', `${a.files} / ${a.total}`, `${en[1]} / ${en[2]}`);
   }
 }
 

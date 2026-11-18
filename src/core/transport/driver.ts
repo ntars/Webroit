@@ -7,14 +7,23 @@
  * 不理解任何业务语义（不知道什么叫冻结应用、什么叫改 DPI）。
  *
  * 依赖全部动态 import：不插线、不进终端页的用户，一个字节都不用下载。
+ *
+ * 关于类型：`@yume-chan/*` 的 `.d.ts` 自带一套与 DOM 不一致的 `ReadableStream`
+ * 声明形状 —— 但运行时它就是 `globalThis.ReadableStream`（见 `stream-extra/esm/stream.js`），
+ * 两边是同一个类，差异只在声明上。所以这里**不做任何类型断言**，而是：
+ *   1. 传输层内部一律用包自带的真实类型（`Adb` / `AdbSync` / `AdbSocket`）；
+ *   2. 需要同时吃下 DOM 流与包内流的地方，用只描述「能拿 reader、能读、能放锁」的
+ *      窄结构接口 `ByteSource`，两边都天然满足，无需强转；
+ *   3. 把 DOM 流交给包的方法时（`sync.write`），用包自己的构造函数重新包一层，
+ *      运行时零拷贝（同一个构造器），类型上两侧都对。
  */
 
 import {
   baseName,
   checkAbort,
-  joinBytes,
   toArrayBuffer,
 } from '@/core/utils';
+import { collect } from '@/core/transport/stream';
 import type {
   DeviceDriver,
   ExecOptions,
@@ -22,58 +31,24 @@ import type {
   TerminalHandle,
   TransferOptions,
 } from '@/core/transport/types';
+import type { Adb, AdbDaemonConnection, AdbSync } from '@yume-chan/adb';
+import type { AdbDaemonWebUsbDevice } from '@yume-chan/adb-daemon-webusb';
 
 // 类型从 types.ts 统一出口再导出，历史调用点（import from '@/core/transport/driver'）无需改动
 export type { ExecOptions, ShellResult, TerminalHandle, TransferOptions };
 
 /** 设备授权取消 */
 export interface ConnectOptions {
-  device?: unknown;
+  /** 已授权过的设备对象，可从 `listAuthorizedDevices()` 取得；不传则弹选择框 */
+  device?: AdbDaemonWebUsbDevice;
   signal?: AbortSignal;
 }
 
 /** 读取流的体积上限，防止一条命令把内存撑爆 */
-const STDOUT_LIMIT = 32 * 1024 * 1024;
 const PULL_LIMIT = 768 * 1024 * 1024;
 
 /** UTF-8 编解码器，流式使用 */
 const decoder = () => new TextDecoder();
-
-/**
- * 把 ReadableStream 全量读进内存，附带体积上限与进度回调。
- */
-async function collect(
-  readable: ReadableStream<Uint8Array>,
-  options: {
-    limit?: number;
-    onProgress?: (size: number) => void;
-    onChunk?: (chunk: Uint8Array) => void;
-  } = {},
-): Promise<Uint8Array> {
-  const { limit = STDOUT_LIMIT, onProgress, onChunk } = options;
-  const reader = readable.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      size += value.length;
-      if (size > limit) {
-        throw new Error(
-          `输出超过 ${Math.round(limit / 1048576)} MB，请缩小命令范围或停止长时间运行的命令`,
-        );
-      }
-      chunks.push(value);
-      onProgress?.(size);
-      onChunk?.(value);
-    }
-    return joinBytes(chunks);
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 /**
  * Driver —— 一台已连接设备的操作句柄（WebUSB 实现）。
@@ -92,15 +67,16 @@ export class Driver implements DeviceDriver {
   /** 连接是否存活 */
   connected = true;
 
-  #adb: any;
+  /** 底层 ADB 会话，只有 session 层做能力探测时会用到 */
+  #adb: Adb;
   #closeOwned: () => Promise<void>;
-  #sessions = new Set<any>();
+  #sessions = new Set<AdbSync>();
   #terminals = new Set<TerminalHandle>();
   #closing?: Promise<void>;
   #disconnected: Promise<void>;
 
   constructor(
-    adb: any,
+    adb: Adb,
     options: { serial?: string; label?: string; closeOwned?: () => Promise<void> },
   ) {
     this.#adb = adb;
@@ -121,7 +97,7 @@ export class Driver implements DeviceDriver {
   }
 
   /** 拿到底层 adb 实例（仅限 session 层做能力探测） */
-  get raw(): any {
+  get raw(): Adb {
     return this.#adb;
   }
 
@@ -176,8 +152,8 @@ export class Driver implements DeviceDriver {
           exitCode,
         };
       } catch (error) {
-        await process.kill().catch(() => {});
-        await Promise.allSettled(jobs as unknown as Promise<unknown>[]);
+        await Promise.resolve(process.kill()).catch(() => {});
+        await Promise.allSettled(jobs);
         throw error;
       }
     }
@@ -196,8 +172,8 @@ export class Driver implements DeviceDriver {
       if (!Number.isFinite(exitCode)) throw new Error('设备返回了无效退出状态');
       return { stdout: text.slice(0, at), stderr: '', exitCode };
     } catch (error) {
-      await process.kill().catch(() => {});
-      await Promise.allSettled(jobs as unknown as Promise<unknown>[]);
+      await Promise.resolve(process.kill()).catch(() => {});
+      await Promise.allSettled(jobs);
       throw error;
     }
   }
@@ -213,16 +189,18 @@ export class Driver implements DeviceDriver {
       : await subprocess.noneProtocol.pty();
 
     if (!this.connected) {
-      await pty.kill();
+      await Promise.resolve(pty.kill()).catch(() => {});
       throw new Error('设备已断开');
     }
 
+    // 两种协议（shell / none）的 pty 退出码类型不同（number / undefined），
+    // 收窄成统一的 TerminalHandle 后再挂监听，避免在联合类型上调 .then。
     const handle: TerminalHandle = {
       kill: () => pty.kill(),
       exited: pty.exited,
     };
     this.#terminals.add(handle);
-    pty.exited.then(
+    Promise.resolve(handle.exited).then(
       () => this.#terminals.delete(handle),
       () => this.#terminals.delete(handle),
     );
@@ -233,7 +211,7 @@ export class Driver implements DeviceDriver {
    * 在一次 sync 会话里完成读写，结束后一定释放。
    * sync 通道是独占的：不 dispose 会让后续所有文件操作卡死。
    */
-  async #withSync<T>(work: (sync: any) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async #withSync<T>(work: (sync: AdbSync) => Promise<T>, signal?: AbortSignal): Promise<T> {
     checkAbort(signal);
     const sync = await this.#adb.sync();
     this.#sessions.add(sync);
@@ -282,18 +260,29 @@ export class Driver implements DeviceDriver {
   /** 推送本地文件到设备 */
   async write(file: File, remotePath: string, options: TransferOptions = {}): Promise<void> {
     const { signal, onProgress } = options;
+    const libs = await loadLibs();
     await this.#withSync(async (sync) => {
-      let done = 0;
-      const source = file.stream().pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, controller) {
-            checkAbort(signal);
-            done += chunk.length;
-            onProgress?.(done, file.size);
-            controller.enqueue(chunk);
-          },
-        }),
-      );
+      // 文件流是 DOM 的 ReadableStream，sync.write 要的是包内的流类型。
+      // 运行时两者是同一个构造器（stream-extra 直接导出 globalThis.ReadableStream），
+      // 所以这里用包自己的构造器重新包一层，语义等价、零拷贝，两侧类型都成立。
+      const reader = file.stream().getReader();
+      let sent = 0;
+      const source = new libs.stream.ReadableStream<Uint8Array>({
+        async pull(controller) {
+          checkAbort(signal);
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            return;
+          }
+          sent += value.length;
+          onProgress?.(sent, file.size);
+          controller.enqueue(value);
+        },
+        cancel() {
+          void reader.cancel().catch(() => {});
+        },
+      });
       await sync.write({
         filename: remotePath,
         file: source,
@@ -339,7 +328,7 @@ export class Driver implements DeviceDriver {
     try {
       return decoder().decode(await collect(socket.readable, { limit: 1024 * 1024 }));
     } finally {
-      await socket.close().catch(() => {});
+      await Promise.resolve(socket.close()).catch(() => {});
     }
   }
 
@@ -354,7 +343,7 @@ export class Driver implements DeviceDriver {
       return;
     }
     const socket = await this.#adb.createSocket('reboot:' + mode);
-    await socket.close().catch(() => {});
+    await Promise.resolve(socket.close()).catch(() => {});
   }
 
   /** 关闭连接，杀掉所有终端与 sync 会话 */
@@ -381,12 +370,19 @@ export class Driver implements DeviceDriver {
 
 /* ─────────────────────────── 依赖加载 ─────────────────────────── */
 
+/**
+ * 四个 ADB 依赖的命名空间。
+ *
+ * 全部用 `typeof import()` 取真实类型 —— 它由动态 import 的返回值直接推导，
+ * 不需要手写形状，也不会因为包升级而失真。
+ */
 interface Libs {
-  adb: any;
-  stream: any;
-  usb: any;
-  CredentialStore: any;
-  manager: any;
+  adb: typeof import('@yume-chan/adb');
+  stream: typeof import('@yume-chan/stream-extra');
+  usb: typeof import('@yume-chan/adb-daemon-webusb');
+  CredentialStore: typeof import('@yume-chan/adb-credential-web').default;
+  /** WebUSB 管理器；浏览器不支持 WebUSB 时为 undefined */
+  manager: typeof import('@yume-chan/adb-daemon-webusb').AdbDaemonWebUsbDeviceManager.BROWSER;
 }
 
 let libsPromise: Promise<Libs> | null = null;
@@ -407,8 +403,8 @@ async function loadLibs(): Promise<Libs> {
 
     // 自检：确保流依赖是同一个实例，否则 Consumable 判定会失效
     const probe = new Uint8Array([1]);
-    const consumable = new (streamLib as any).Consumable(probe);
-    if ((streamLib as any).MaybeConsumable.getValue(consumable) !== probe) {
+    const consumable = new streamLib.Consumable(probe);
+    if (streamLib.MaybeConsumable.getValue(consumable) !== probe) {
       throw new Error('流依赖实例不一致，请检查依赖版本');
     }
 
@@ -416,8 +412,8 @@ async function loadLibs(): Promise<Libs> {
       adb: adbLib,
       stream: streamLib,
       usb: usbLib,
-      CredentialStore: (credentialLib as any).default,
-      manager: (usbLib as any).AdbDaemonWebUsbDeviceManager.BROWSER,
+      CredentialStore: credentialLib.default,
+      manager: usbLib.AdbDaemonWebUsbDeviceManager.BROWSER,
     };
   })();
   return libsPromise;
@@ -438,7 +434,7 @@ export function isWebUsbSupported(): boolean {
  * 否则会把 Driver 当成 transport 传进去。
  */
 async function authenticate(
-  connection: any,
+  connection: AdbDaemonConnection,
   serial: string,
   closeOwned: () => Promise<void>,
   signal: AbortSignal | undefined,
@@ -469,8 +465,8 @@ async function authenticate(
   });
   // 若已取消，认证成功后也要立刻关掉，避免泄漏
   auth.then(
-    (transport: any) => {
-      if (cancelled) void transport.close().catch(() => {});
+    (transport) => {
+      if (cancelled) void Promise.resolve(transport.close()).catch(() => {});
     },
     () => {},
   );
@@ -490,7 +486,7 @@ async function authenticate(
 }
 
 /** 列出浏览器已授权过的设备（不弹选择框） */
-export async function listAuthorizedDevices(): Promise<unknown[]> {
+export async function listAuthorizedDevices(): Promise<AdbDaemonWebUsbDevice[]> {
   const libs = await loadLibs();
   if (!libs.manager) return [];
   return libs.manager.getDevices();
@@ -507,7 +503,8 @@ export async function connectUsb(options: ConnectOptions = {}): Promise<Driver> 
     );
   }
 
-  const selected: any = device ?? (await libs.manager.requestDevice());
+  const selected: AdbDaemonWebUsbDevice | undefined =
+    device ?? (await libs.manager.requestDevice());
   if (!selected) throw new DOMException('未选择设备', 'AbortError');
   checkAbort(signal);
 
@@ -526,8 +523,10 @@ export async function connectUsb(options: ConnectOptions = {}): Promise<Driver> 
   } catch (error) {
     await close().catch(() => {});
     const message = error instanceof Error ? error.message : String(error);
+    // 用 instanceof 判 busy：该错误类由包导出，比读 name 字符串可靠
+    // （name 会被压缩器、跨 iframe 等情形改掉）。
     if (
-      (error as any)?.name === 'DeviceBusyError' ||
+      error instanceof libs.usb.AdbDaemonWebUsbDevice.DeviceBusyError ||
       /already.*use|claim.*interface/i.test(message)
     ) {
       throw new Error('当前 ADB 接口被占用，请结束本机 adb.exe 进程或其他 WebADB 页面后重试');

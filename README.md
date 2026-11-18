@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 57 个源文件、15,244 行（含 CSS 与测试） |
-| 产物规模 | 461 KB / 12 个文件，首屏 gzip 约 56 KB |
+| 代码规模 | 59 个源文件、15,429 行（含 CSS 与测试） |
+| 产物规模 | 462 KB / 12 个文件，首屏 gzip 约 56 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -666,7 +666,7 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 4 个文件、109 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 5 个文件、119 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 ### 7.3a 一致性校验
 
@@ -1028,13 +1028,13 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 139.7 KB | 47.5 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
-| `index-*.css` | 35.2 KB | 6.5 KB | 五份样式表合并后 |
+| `index-*.js` | 141.0 KB | 48.2 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.css` | 35.8 KB | 6.6 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
 | 图标合计 | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **首屏合计** | **约 177 KB** | **约 55 KB** | JS + CSS + HTML，不含图标 |
-| **全量产物** | **460 KB** | **—** | `dist/` 12 个文件 |
+| **首屏合计** | **约 179 KB** | **约 56 KB** | JS + CSS + HTML，不含图标 |
+| **全量产物** | **462 KB** | **—** | `dist/` 12 个文件 |
 
 构建耗时 0.8 秒，模块数 180。类型检查 `tsc --noEmit` 零错误。
 
@@ -1282,7 +1282,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补单元测试与端到端测试并接入 CI —— 当前逻辑正确性靠临时脚本验证，无法防止回归。
+1. 补端到端测试 —— 纯函数层已有 119 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1320,22 +1320,38 @@ v0.2 之前的**技术债清单**（优先于新功能）：
 - 提交信息用中文，格式：`类型: 动作`，例如 `应用管理: 修复停用系统包后无法恢复`。
 - 单文件不超过约 500 行；超了就拆，服务按分区拆，组件按职责拆。
 
-### 18.4 与文档描述不一致的两处现状
+### 18.4 `any` 已归零（曾经的取舍与现在的做法）
 
-如实说明，避免贡献者按文档操作后受挫：
+早期版本里 `src/core/transport/driver.ts` 有 18 处 `any`，理由是「`@yume-chan/*` 自带的 `ReadableStream` 与 DOM 的 `ReadableStream` 不兼容，标注了必然在十几个调用点报错」。这个理由只对了一半：报错是真的，但那两个 `ReadableStream` **在运行时是同一个类** —— `@yume-chan/stream-extra` 的 `esm/stream.js` 直接 `export { ReadableStream }`，取的就是 `globalThis.ReadableStream`。冲突只存在于 `.d.ts` 声明形状（一个有零参 `getReader()` 重载，一个没有），不是真实的对象差异。
 
-1. **`any` 并非零使用**。全仓 53 个 `.ts` / `.tsx` 文件中，只有 `src/core/transport/driver.ts` 一个文件用了 `any`，共 18 处，其余 52 个文件零 `any`（含 4 个测试文件）。18 处按成因分三类：
+弄清这点之后，18 处全部收掉了，没有一处用 `as unknown as` 硬转：
 
-   | 位置 | 处数 | 为什么必须是 `any` |
-   |---|---|---|
-   | `loadLibs()` 的 `Libs` 接口与解构 | 9 | 四个 `@yume-chan/*` 包都是动态 `import()`，返回的命名空间对象形状随版本变化，静态标注只能靠 `typeof import()`，而 `@yume-chan/stream-extra` 自带一套与 DOM 不兼容的 `ReadableStream`，强行标注会在 12 个调用点引发类型冲突 |
-   | `Driver` 持有的 `#adb` / `sync` 与构造参数 | 7 | 同上，`Adb` 实例与 `AdbSync` 都来自那套类型体系，一旦标注就要求整条链路上的流类型全部统一到 `stream-extra` 的版本 |
-   | `connectUsb()` 的 `selected` 与错误判定 | 2 | `AdbDaemonWebUsbDevice` 的 `connect()` 返回值类型同样是 `stream-extra` 体系；错误分支要匹配运行时的 `name` 字段，而该错误类没有对外导出的类型 |
+| 原来的 `any` | 处数 | 现在的写法 |
+|---|---|---|
+| `Libs` 接口的五个字段（`adb` / `stream` / `usb` / `CredentialStore` / `manager`） | 5 | 改用 `typeof import('@yume-chan/adb')` 这类表达式类型 —— 由动态 import 的返回值直接推导，包升级也不会失真 |
+| 访问 `libs.*` 成员时的 `as any`（`Consumable`、`MaybeConsumable`、`default`、`AdbDaemonWebUsbDeviceManager.BROWSER`） | 4 | 全部去掉断言。命名空间的类型本来就带这些导出，`as any` 只是当年为了绕开「没写形参类型」而顺手加的 |
+| `Driver` 的字段与形参（`#adb`、`#sessions`、构造函数 `adb`、`get raw()`、`#withSync` 的 `sync`） | 5 | `Adb` / `Set<AdbSync>` / `(sync: AdbSync) => Promise<T>`；`get raw()` 返回 `Adb` |
+| `authenticate()` 的 `connection` 与 `transport` 回调形参 | 2 | `AdbDaemonConnection` / `AdbDaemonTransport`（由 `authenticate()` 的返回类型推导） |
+| `connectUsb()` 的 `selected` 与 `(error as any)?.name` | 2 | `AdbDaemonWebUsbDevice`（`ConnectOptions.device` 一并标注）；错误判定改 `instanceof libs.usb.AdbDaemonWebUsbDevice.DeviceBusyError`，比读 `name` 字符串可靠，压缩器改不掉 |
+| **合计** | **18** | 零 `any`，且无一处 `as unknown as` |
 
-   这三类的共同点是**都卡在 `stream-extra` 的 `ReadableStream` 与 DOM `ReadableStream` 不兼容**这一点上。v0.1 曾尝试用 `import type` 全部替换，`tsc` 立刻在 12 个流处理调用点报类型不匹配 —— 这不是懒，是那套包的类型设计使然。彻底解决需要把整个传输层的流全部换成 `stream-extra` 的类型，属于 v0.2 的重构项。
-2. ~~没有 ESLint 配置~~ —— **已补齐**。仓库根目录的 `eslint.config.js` 使用 ESLint 9 扁平配置，基于 `typescript-eslint` 的 recommended 规则集，并把 `no-explicit-any` 定为 error：`driver.ts` 因第四节所述的类型体系限制单独放行，其余源码出现 `any` 一律让 `npm run lint` 失败。「UI 层不得 import `@yume-chan/adb`」这条约束仍靠分层约定维持，尚未落成自定义规则。
+真正需要绕开的只有一处形状差异：读流时不能把 DOM 的 `ReadableStream` 直接传给按包内类型声明的形参。解法不是断言，而是新增一个窄结构接口：
 
-`any` 的收敛仍列入 v0.2 之前的技术债。
+```ts
+// 只要求「能拿 reader、能读、能放锁」。DOM 流与包内的流都天然满足。
+interface ByteSource {
+  getReader(): {
+    read(): Promise<{ done: boolean; value?: Uint8Array }>;
+    releaseLock(): void;
+  };
+}
+```
+
+`collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
+
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 55 个 `.ts` / `.tsx` 文件、0 处 `any`（含 5 个测试文件）。
+
+唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 
 ---
 

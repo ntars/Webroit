@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 57 source files, 15,244 lines (CSS and tests included) |
-| Artifact size | 461 KB across 12 files; first paint roughly 56 KB gzipped |
+| Code size | 59 source files, 15,429 lines (CSS and tests included) |
+| Artifact size | 462 KB across 12 files; first paint roughly 56 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -662,7 +662,7 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 4 files, 109 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 5 files, 119 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 ### 7.3a Consistency Checks
 
@@ -1024,13 +1024,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 139.7 KB | 47.5 KB | Required for first paint: Preact, tool registry, all services and views |
-| `index-*.css` | 35.2 KB | 6.5 KB | Five stylesheets merged |
+| `index-*.js` | 141.0 KB | 48.2 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.css` | 35.8 KB | 6.6 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
 | Icons total | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 177 KB** | **about 55 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **460 KB** | **—** | 12 files in `dist/` |
+| **First paint total** | **about 179 KB** | **about 56 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **462 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1316,22 +1316,39 @@ Plugin examples are not accepted for now — the plugin system is not implemente
 - Commit messages are in Chinese, formatted as `type: action`, for example `应用管理: 修复停用系统包后无法恢复`.
 - Files stay under roughly 500 lines; split beyond that, services by section and components by responsibility.
 
-### 18.4 Two Current States That Differ from the Documentation
+### 18.4 `any` Is Now Zero — What the Old Trade-off Got Wrong
 
-Stated plainly so contributors are not frustrated after following the documentation:
+Earlier versions carried 18 `any`s in `src/core/transport/driver.ts`, justified by "`@yume-chan/*` ships a `ReadableStream` that is incompatible with the DOM one, so annotating it produces a dozen errors downstream". That was half true: the errors were real, but the two `ReadableStream`s **are the same class at runtime** — `@yume-chan/stream-extra`'s `esm/stream.js` does `export { ReadableStream }` straight from `globalThis`. The conflict lives only in the `.d.ts` shapes (one declares a zero-argument `getReader()` overload, the other does not), not in the objects.
 
-1. **`any` is not entirely absent.** Of the 53 `.ts` / `.tsx` files, exactly one — `src/core/transport/driver.ts` — uses `any`, in 18 places. The other 52 files contain none (four of them are test files). The 18 fall into three groups:
+Once that was clear, all 18 went away without a single `as unknown as`:
 
-   | Location | Count | Why it must be `any` |
-   |---|---|---|
-   | The `Libs` interface in `loadLibs()` and its destructuring | 9 | All four `@yume-chan/*` packages are loaded via dynamic `import()`, and the shape of the returned namespace object varies across versions. The only static annotation available is `typeof import()`, but `@yume-chan/stream-extra` ships its own `ReadableStream` that is incompatible with the DOM one — annotating properly produces type conflicts at 12 call sites |
-   | `Driver`'s `#adb` / `sync` fields and constructor argument | 7 | Same root cause: `Adb` and `AdbSync` come from that type system, so annotating them would require every stream in the call chain to be unified onto `stream-extra`'s version |
-   | `selected` and the error check in `connectUsb()` | 2 | `AdbDaemonWebUsbDevice.connect()` returns a value from the same `stream-extra` system, and the error branch has to match the runtime `name` field on an error class that exports no type |
+| Was `any` | Count | Now |
+|---|---|---|
+| The five `Libs` fields (`adb` / `stream` / `usb` / `CredentialStore` / `manager`) | 5 | Expression types such as `typeof import('@yume-chan/adb')`, inferred from the dynamic `import()` return value — they stay accurate across package upgrades |
+| `as any` on `libs.*` member access (`Consumable`, `MaybeConsumable`, `default`, `AdbDaemonWebUsbDeviceManager.BROWSER`) | 4 | All assertions removed. The namespace types already export these; the casts existed only to paper over the untyped parameters |
+| `Driver` fields and parameters (`#adb`, `#sessions`, constructor `adb`, `get raw()`, `#withSync`'s `sync`) | 5 | `Adb` / `Set<AdbSync>` / `(sync: AdbSync) => Promise<T>`; `get raw()` returns `Adb` |
+| `authenticate()`'s `connection` and `transport` callback parameter | 2 | `AdbDaemonConnection` / `AdbDaemonTransport`, inferred from `authenticate()`'s return type |
+| `connectUsb()`'s `selected` and `(error as any)?.name` | 2 | `AdbDaemonWebUsbDevice` (with `ConnectOptions.device` typed too); the error check became `instanceof libs.usb.AdbDaemonWebUsbDevice.DeviceBusyError`, which survives minification unlike a `name` string |
+| **Total** | **18** | Zero `any`, no `as unknown as` |
 
-   All three groups hit the same wall: **`stream-extra`'s `ReadableStream` is not assignable to the DOM `ReadableStream`**. v0.1 did try replacing every `any` with `import type`; `tsc` immediately reported type mismatches at 12 stream-handling call sites. This is not laziness — it is how those packages are typed. Fixing it properly means migrating the entire transport layer's streams onto `stream-extra`'s types, which is a v0.2 refactor.
-2. ~~No ESLint configuration~~ — **now in place.** The root `eslint.config.js` uses ESLint 9's flat config on top of `typescript-eslint`'s recommended set, and pins `no-explicit-any` to error: `driver.ts` is exempted for the type-system reasons in point 1, while `any` anywhere else fails `npm run lint`. The rule "the UI layer must not import `@yume-chan/adb`" is still held by layering conventions rather than a custom lint rule.
+Exactly one shape difference had to be worked around, and the fix is a narrow structural interface rather than a cast:
 
-The `any` cleanup is still on the technical debt list before v0.2.
+```ts
+// Only requires: take a reader, read a chunk, release the lock.
+// Both the DOM stream and the package's stream satisfy it.
+interface ByteSource {
+  getReader(): {
+    read(): Promise<{ done: boolean; value?: Uint8Array }>;
+    releaseLock(): void;
+  };
+}
+```
+
+`collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
+
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 55 `.ts` / `.tsx` files, 0 places of `any` (five are test files).
+
+The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 
 ---
 

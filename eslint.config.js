@@ -35,13 +35,4 @@ export default tseslint.config(
       'no-undef': 'off',
     },
   },
-  {
-    // WebUSB 的类型定义（@types/w3c-web-usb 未安装，@yume-chan 的类型也不完整）
-    // 迫使此文件必须用 any 承接原生 USB 对象。已在 STATE.md 的 T-006 登记，
-    // 待引入完整 USB 类型定义后一并收敛，这里先放行。
-    files: ['src/core/transport/driver.ts'],
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'off',
-    },
-  },
 );
