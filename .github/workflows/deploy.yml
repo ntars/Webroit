@@ -43,6 +43,11 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
+      - name: 单元测试
+        # 覆盖纯函数层（解析器、shell 校验器、工具注册表、设置快照）。
+        # 这一层不依赖 DOM 与真机，跑一遍不到一秒，能在构建前就拦住逻辑回归。
+        run: npm test
+
       - name: 代码规范检查
         # 与 typecheck 互补：tsc 管类型，eslint 管「类型正确但写错了」的问题
         # （显式 any、未使用的变量、正则里的控制字符等）。

@@ -12,10 +12,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { tmpdir } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const README = join(ROOT, 'README.md');
@@ -110,6 +111,35 @@ async function toolStats() {
     return { total: all.length, generic, perBrand: generic + 2, brands: brands.length };
   } finally {
     if (existsSync(out)) unlinkSync(out);
+  }
+}
+
+/**
+ * 单元测试用例数。
+ *
+ * 直接数源码里的 `it(` 不可靠（循环、`it.each`、跳过都会算错），
+ * 所以真跑一遍 vitest 取 JSON 报告里的总数 —— 这个数字才是 CI 里实际通过的用例数。
+ * 代价是多跑一次测试（约 0.2 秒），换来文档里的数字永远等于真实结果。
+ */
+function testStats() {
+  const out = join(tmpdir(), `webroit-vitest-${process.pid}.json`);
+  try {
+    execFileSync(
+      join(ROOT, 'node_modules/.bin/vitest'),
+      ['run', '--reporter=json', `--outputFile=${out}`],
+      { cwd: ROOT, stdio: 'pipe' },
+    );
+    const report = JSON.parse(readFileSync(out, 'utf8'));
+    return {
+      files: report.testResults?.length ?? 0,
+      total: report.numTotalTests ?? 0,
+      passed: report.numPassedTests ?? 0,
+    };
+  } catch (error) {
+    // 测试跑挂时既可能没有报告也可能有部分报告：都当作「无法重算」处理
+    return { error: error instanceof Error ? error.message.split('\n')[0] : String(error) };
+  } finally {
+    rmSync(out, { force: true });
   }
 }
 
@@ -252,7 +282,36 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
   }
 }
 
-// 5. 中英文档章节数一致
+// 5. 单元测试用例数
+{
+  const t = testStats();
+  if (t.error) {
+    fail('单元测试', '可运行', `运行失败：${t.error}`);
+  } else {
+    const zh = readme.match(/共 (\d+) 个文件、(\d+) 个用例/);
+    if (!zh) fail('README 单元测试用例数声明', t.total, null, '未找到「共 N 个文件、M 个用例」');
+    else {
+      Number(zh[1]) === t.files
+        ? pass('测试文件数', t.files)
+        : fail('测试文件数', t.files, Number(zh[1]), 'README「共 N 个文件」');
+      Number(zh[2]) === t.total
+        ? pass('单元测试用例数', t.total)
+        : fail('单元测试用例数', t.total, Number(zh[2]), 'README「M 个用例」');
+    }
+
+    if (readmeEn) {
+      const en = readmeEn.match(/(\d+) files, (\d+) cases/);
+      if (!en) fail('README_EN 单元测试声明', t.total, null, '未找到「N files, M cases」');
+      else if (Number(en[1]) === t.files && Number(en[2]) === t.total) pass('README_EN 单元测试用例数', t.total);
+      else fail('README_EN 单元测试用例数', `${t.files} 文件 / ${t.total} 用例`, `${en[1]} / ${en[2]}`);
+    }
+
+    if (t.passed !== t.total) fail('单元测试全部通过', `${t.passed}/${t.total}`, '全部通过');
+    else pass('单元测试全部通过', `${t.passed}/${t.total}（${t.files} 个文件）`);
+  }
+}
+
+// 6. 中英文档章节数一致
 if (readmeEn) {
   const count = (text, re) => (text.match(re) ?? []).length;
   const h2zh = count(readme, /^## /gm);

@@ -35,7 +35,7 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 53 个源文件、14,225 行（含 CSS） |
+| 代码规模 | 57 个源文件、15,112 行（含 CSS 与测试） |
 | 产物规模 | 460 KB / 12 个文件，首屏 gzip 约 55 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
@@ -637,11 +637,14 @@ npm run dev
 ```bash
 npm run typecheck  # 浏览器侧与 Node 侧各跑一次 tsc
 npm run lint       # ESLint 9 扁平配置，含 no-explicit-any
+npm test           # vitest 单元测试，纯函数层，无需浏览器与真机
 npm run build      # tsc --noEmit → vite build → 注入 Service Worker
 npm run preview    # 本地预览构建产物
 ```
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
+
+`npm test` 跑的是 `src/**/*.test.ts`，共 4 个文件、109 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 ### 7.3a 一致性校验
 
@@ -652,7 +655,7 @@ npm run verify:docs     # README 的记录 vs 仓库现状（需先 build）
 npm run verify:theme    # 配色是否仍为纯黑白灰、对比度是否达标（需先 build）
 ```
 
-`verify:docs` 校验 17 项：源文件数与行数、产物文件数与体积、各 chunk 的 gzip 大小、工具数量（26 / 24 / 34 三个口径）、品牌数、`any` 的分布、中英文档的章节数是否一致。它已在 CI 中作为构建后的一步运行，不一致就让部署失败。
+`verify:docs` 逐项核对可以从仓库现状重算的事实：源文件数与行数、产物文件数与体积、各 chunk 的 gzip 大小、工具数量（26 / 24 / 34 三个口径）、品牌数、`any` 的分布、单元测试文件数与用例数、中英文档的章节数是否一致。它已在 CI 中作为构建后的一步运行，不一致就让部署失败。
 
 `verify:theme` 启动无头 Chrome 读取真实计算样式，检查所有非语义 token 的色度（确认没有混入彩色）、强调色方向（深色主题必须浅、浅色主题必须深）、以及正文/导航/按钮的对比度是否达到 WCAG AA。它不进 CI —— 需要 Chrome 环境，作为本地改色后的自检项更合适。
 
@@ -986,7 +989,9 @@ Webroit/
 └── README_EN.md
 ```
 
-规划中但尚未创建：`src/plugins/`（插件宿主）、`src/ui/i18n/`（语言包）、`tests/`（单元与端到端测试）、`public/scrcpy-server`（投屏尚未实现）。
+规划中但尚未创建：`src/plugins/`（插件宿主）、`src/ui/i18n/`（语言包）、`public/scrcpy-server`（投屏尚未实现）。
+
+单元测试不另建 `tests/` 目录，而是与被测文件同目录放 `*.test.ts`（`src/core/utils.test.ts` 等）：被测代码一动，测试就在眼皮底下，比跨目录找文件更容易维护。端到端测试尚未建立。
 
 ---
 
@@ -1197,7 +1202,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 | 2 | 部分厂商 ROM 限制 `pm` / `settings` | 命令返回权限错误 | 显示原始错误 + 厂商说明 |
 | 3 | GPU 负载读数不可靠 | 各厂商 sysfs 节点不同 | 不可读时标注而非显示 0 |
 | 4 | Service Worker 更新需手动刷新 | 用户可能长时间停留在旧版本 | 顶部横条提示，不自动刷新以免打断操作 |
-| 5 | 无单元测试与端到端测试 | 逻辑正确性靠临时脚本验证，未纳入 CI | 待补，见路线图 |
+| 5 | 端到端测试缺席 | 真实 USB 握手与多机型行为无法在 CI 里回归 | 纯函数层单元测试已接入 CI，端到端待补，见路线图 |
 
 ---
 
@@ -1231,7 +1236,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 **已知不足**
 
 - 投屏、logcat、Fastboot、脚本编排、插件系统、多设备均未实现。
-- 无单元测试与端到端测试。
+- 端到端测试缺席。纯函数层已有单元测试并接入 CI，真实 WebUSB 握手仍需人工验证。
 - 无设备报告导出与脱敏。
 
 ### 更早
@@ -1270,7 +1275,7 @@ v0.2 之前的**技术债清单**（优先于新功能）：
 | 错误码映射 | 补充常见 ADB 报错的中文解释，位置在对应 service 的错误处理分支 | 低 |
 | 文档校对 | 核对 `README.md` 与 `README_EN.md` 的事实一致性，指出与代码不符之处 | 低 |
 | 新工具 | 按 `Tool` 接口实现一个功能条目，附实机截图与失败表现 | 中 |
-| 测试 | 为 `src/core/` 与 `src/services/` 补单元测试，这两层的依赖已被接口化，易测 | 中 |
+| 测试 | 为 `src/services/` 剩余模块补单元测试，接口化后的依赖使其易测 | 中 |
 | 缺陷报告 | 附设备型号、Android 版本、ROM、复现步骤、控制台日志 | 低 |
 
 插件示例暂不接受 —— 插件系统尚未实现，见 10.7。
@@ -1294,7 +1299,7 @@ v0.2 之前的**技术债清单**（优先于新功能）：
 
 如实说明，避免贡献者按文档操作后受挫：
 
-1. **`any` 并非零使用**。全仓 49 个 `.ts` / `.tsx` 文件中，只有 `src/core/transport/driver.ts` 一个文件用了 `any`，共 18 处，其余 48 个文件零 `any`。18 处按成因分三类：
+1. **`any` 并非零使用**。全仓 53 个 `.ts` / `.tsx` 文件中，只有 `src/core/transport/driver.ts` 一个文件用了 `any`，共 18 处，其余 52 个文件零 `any`（含 4 个测试文件）。18 处按成因分三类：
 
    | 位置 | 处数 | 为什么必须是 `any` |
    |---|---|---|

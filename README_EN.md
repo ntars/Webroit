@@ -35,7 +35,7 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 53 source files, 14,225 lines (CSS included) |
+| Code size | 57 source files, 15,112 lines (CSS and tests included) |
 | Artifact size | 460 KB across 12 files; first paint roughly 55 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
@@ -633,11 +633,14 @@ With no device available, open `dev-preview.html` to browse the interface agains
 ```bash
 npm run typecheck  # tsc once for the browser side, once for the Node side
 npm run lint       # ESLint 9 flat config, with no-explicit-any enabled
+npm test           # vitest unit tests over the pure-function layer; no browser or device needed
 npm run build      # tsc --noEmit → vite build → inject Service Worker
 npm run preview    # preview the build output locally
 ```
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
+
+`npm test` runs `src/**/*.test.ts`: 4 files, 109 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 ### 7.3a Consistency Checks
 
@@ -648,7 +651,7 @@ npm run verify:docs     # README's claims vs the repo (run after build)
 npm run verify:theme    # is the palette still pure grey, is contrast sufficient (run after build)
 ```
 
-`verify:docs` checks 17 items: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
+`verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
 
 `verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and whether text/nav/button contrast meets WCAG AA. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
 
@@ -982,7 +985,9 @@ Webroit/
 └── README_EN.md
 ```
 
-Planned but not yet created: `src/plugins/` (plugin host), `src/ui/i18n/` (language packs), `tests/` (unit and end-to-end tests), `public/scrcpy-server` (screen mirroring not implemented).
+Planned but not yet created: `src/plugins/` (plugin host), `src/ui/i18n/` (language packs), `public/scrcpy-server` (screen mirroring not implemented).
+
+Unit tests live next to the code they cover (`src/core/utils.test.ts` and so on) rather than in a separate `tests/` directory: when the code under test changes, its tests are right there, which is easier to maintain than hunting across directories. End-to-end tests do not exist yet.
 
 ---
 
@@ -1193,7 +1198,7 @@ Outside a secure context (HTTP and not localhost), neither the Service Worker no
 | 2 | Some vendor ROMs restrict `pm` / `settings` | The command returns a permission error | The raw error is shown along with the vendor note |
 | 3 | GPU load readings are unreliable | sysfs nodes differ across vendors | Labelled as unavailable rather than shown as 0 |
 | 4 | Service Worker updates require a manual refresh | Users may stay on an old version for a long time | A top bar prompts; no automatic refresh to avoid interrupting work |
-| 5 | No unit or end-to-end tests | Correctness relies on ad-hoc scripts and is absent from CI | Pending; see the roadmap |
+| 5 | End-to-end tests are absent | Real USB handshakes and multi-device behaviour cannot regress in CI | Unit tests cover the pure-function layer in CI; end-to-end pending, see the roadmap |
 
 ---
 
@@ -1227,7 +1232,7 @@ First runnable version.
 **Known gaps**
 
 - Mirroring, logcat, Fastboot, script orchestration, the plugin system, and multi-device support are not implemented.
-- No unit or end-to-end tests.
+- End-to-end tests are absent. The pure-function layer is covered by unit tests in CI; a real WebUSB handshake still needs manual verification.
 - No device report export or redaction.
 
 ### Earlier
@@ -1248,7 +1253,7 @@ The project was previously in design and planning. There is no public release be
 
 **Technical debt list** before v0.2 (prioritised over new features):
 
-1. Add unit and end-to-end tests and wire them into CI — correctness currently relies on ad-hoc scripts and cannot prevent regressions.
+1. Add end-to-end tests — the pure-function layer is covered by unit tests in CI, but a real WebUSB handshake still needs manual verification.
 2. Device report export with sensitive-data redaction (see 13.4).
 3. Single-file offline build (see 7.5), or explicitly retire the plan.
 
@@ -1266,7 +1271,7 @@ The project was previously in design and planning. There is no public release be
 | Error-code mapping | Add Chinese explanations for common ADB errors, in the error branch of the relevant service | Low |
 | Documentation review | Verify factual consistency between `README.md` and `README_EN.md`, and point out mismatches with the code | Low |
 | New tools | Implement a feature entry against the `Tool` interface, with screenshots and failure behaviour from a real device | Medium |
-| Testing | Add unit tests for `src/core/` and `src/services/`; both layers depend on interfaces and are easy to test | Medium |
+| Testing | Add unit tests for the remaining `src/services/` modules; the interfaces already make them testable | Medium |
 | Bug reports | Include device model, Android version, ROM, reproduction steps, and console logs | Low |
 
 Plugin examples are not accepted for now — the plugin system is not implemented; see 10.7.
@@ -1290,7 +1295,7 @@ Plugin examples are not accepted for now — the plugin system is not implemente
 
 Stated plainly so contributors are not frustrated after following the documentation:
 
-1. **`any` is not entirely absent.** Of the 49 `.ts` / `.tsx` files, exactly one — `src/core/transport/driver.ts` — uses `any`, in 18 places. The other 48 files contain none. The 18 fall into three groups:
+1. **`any` is not entirely absent.** Of the 53 `.ts` / `.tsx` files, exactly one — `src/core/transport/driver.ts` — uses `any`, in 18 places. The other 52 files contain none (four of them are test files). The 18 fall into three groups:
 
    | Location | Count | Why it must be `any` |
    |---|---|---|
