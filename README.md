@@ -43,6 +43,11 @@
 
 ## 一、项目名称与定位
 
+> **仓库描述 / Description**：`Webroit —— 浏览器里的安卓玩机工具箱：WebUSB 直连 ADB 与 Fastboot，26 项功能已实现、152 项规划，数据不出本机 | An in-browser Android toolbox: ADB and Fastboot over WebUSB, 26 features shipped and 152 planned, all data stays local.`
+>
+> **话题标签 / Topics**（20 个，仅英文）：`adb`, `android`, `android-tools`, `browser`, `fastboot`, `ntarstudio`, `pwa`, `scrcpy`, `typescript`, `webusb`, `ya-webadb`, `webroit`, `preact`, `vite`, `static-site`, `client-side`, `privacy-first`, `no-backend`, `file-manager`, `screen-mirroring`
+
+
 **名称**：Webroit。由 `Web` 与 `roit` 拼合的自造词，不承载缩写含义。选用自造词的唯一理由是检索唯一性——`WebADB` 一类通称已被多个同类站点使用，无法作为独立识别符。
 
 **一句话定位**：把 Android 玩机所需的一切操作搬进浏览器，零安装、零驱动、零后端，数据不出本机。
@@ -227,7 +232,7 @@ Webroit：    打开网页 → 点连接 → 点功能
 
 ---
 
-## 四、核心亮点
+## 四、核心特性
 
 ### 4.1 零安装、零驱动、零后端
 
@@ -346,7 +351,7 @@ Webroit：    打开网页 → 点连接 → 点功能
 
 ---
 
-## 五、设计细节与小巧思
+## 五、设计细节与工程取舍
 
 本章只写**代码里确实存在**的做法，并标出哪些是设计意图但尚未落地。
 
@@ -813,7 +818,7 @@ adb tcpip 5555
 
 ---
 
-## 十、API / 模块说明
+## 十、API 与模块说明
 
 本项目面向终端用户，不对外提供 HTTP API。内部模块契约如下。
 
@@ -1253,7 +1258,7 @@ v0.2 之前的**技术债清单**（优先于新功能）：
 
 ---
 
-## 十八、参与贡献方式
+## 十八、参与贡献
 
 ### 18.1 适合贡献的方向
 

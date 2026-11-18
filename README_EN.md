@@ -43,6 +43,11 @@
 
 ## 1. Name and Positioning
 
+> **仓库描述 / Description**：`Webroit —— 浏览器里的安卓玩机工具箱：WebUSB 直连 ADB 与 Fastboot，26 项功能已实现、152 项规划，数据不出本机 | An in-browser Android toolbox: ADB and Fastboot over WebUSB, 26 features shipped and 152 planned, all data stays local.`
+>
+> **话题标签 / Topics**（20 个，仅英文）：`adb`, `android`, `android-tools`, `browser`, `fastboot`, `ntarstudio`, `pwa`, `scrcpy`, `typescript`, `webusb`, `ya-webadb`, `webroit`, `preact`, `vite`, `static-site`, `client-side`, `privacy-first`, `no-backend`, `file-manager`, `screen-mirroring`
+
+
 **Name**: Webroit. A coined word joining `Web` and `roit`, carrying no acronym meaning. The sole reason for choosing a coined term is search uniqueness — generic labels such as `WebADB` are already used by several comparable sites and cannot serve as a distinct identifier.
 
 **One-line positioning**: move everything Android tinkering requires into the browser — zero installation, zero drivers, zero backend, with data never leaving the local machine.
@@ -57,7 +62,7 @@
 
 ---
 
-## 2. Introduction
+## 2. Overview
 
 ### 2.1 Background
 
@@ -227,7 +232,7 @@ The following are explicitly split into two groups: those shipped in v0.1 and th
 
 ---
 
-## 4. Core Highlights
+## 4. Core Characteristics
 
 ### 4.1 Zero Installation, Zero Drivers, Zero Backend
 
@@ -344,7 +349,7 @@ That yields three entry points:
 
 ---
 
-## 5. Design Details and Small Choices
+## 5. Design Details and Engineering Trade-offs
 
 This chapter covers only what **actually exists in the code**, and marks what is design intent but not yet shipped.
 
@@ -498,7 +503,7 @@ Registration failures (incognito mode, older browsers, insecure contexts) only w
 
 ---
 
-## 6. Technology Stack and Dependency Inventory
+## 6. Technology Stack and Dependencies
 
 All version numbers are taken from the actual resolution in `package-lock.json` (lockfileVersion 3, generated 2026-11-15). If versions change after `npm install`, this section and [NOTICE](NOTICE) must be updated together.
 
@@ -916,7 +921,7 @@ The reason is not technical difficulty but an unresolved security boundary: a pl
 
 ---
 
-## 11. Directory Structure
+## 11. Repository Layout
 
 The following is the actual v0.1 structure, matching the repository contents. Items marked "planned" do not exist yet.
 
@@ -1334,7 +1339,7 @@ Third-party components retain their respective copyrights and licenses; see [NOT
 
 ---
 
-## 20. NOTICE Open-Source Compliance Statement
+## 20. NOTICE and Open-Source Compliance
 
 The complete third-party component disclosure (name, version, copyright holder, license, official URL, purpose, modification status, and license text) is in [NOTICE](NOTICE). That file is maintained separately and cannot be replaced by this section.
 
