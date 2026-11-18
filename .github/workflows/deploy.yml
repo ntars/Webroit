@@ -84,6 +84,13 @@ jobs:
         # 避免线上站点带着过期的性能数据。
         run: npm run verify:docs
 
+      - name: 校验多端适配
+        # 起无头 Chrome，在 375 / 768 / 1024 / 1440 四档宽度下逐分区测量：
+        # 横向溢出、元素越界或被裁、窄屏触控目标 < 44px、抽屉展开后能否关掉。
+        # 同样放在 build 之后 —— 它读的是 dist/ 的真实产物，
+        # 量的是用户真正会加载的那份 CSS 与 DOM。
+        run: npm run verify:layout
+
       - name: 配置 Pages
         uses: actions/configure-pages@v5
 

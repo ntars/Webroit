@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "verify:docs": "node scripts/verify-docs.mjs",
     "verify:theme": "node scripts/verify-theme.mjs",
+    "verify:layout": "node scripts/verify-layout.mjs",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix"
   },

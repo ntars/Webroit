@@ -138,6 +138,28 @@ export const App: FunctionComponent = () => {
     return () => window.removeEventListener('hashchange', sync);
   }, []);
 
+  /*
+   * ── 抽屉的两个退出口 ──
+   *
+   * 窄屏下侧边栏是 position:fixed 的抽屉，展开后正好盖住汉堡按钮本身。
+   * 上一版只留了「点导航项跳分区」这一条路 —— 那等于强迫用户换分区才能退出；
+   * 想留在当前分区继续看的人会被永久困住。所以补两条不改变意图的出口：
+   *
+   * 1. Esc：键盘用户的通用习惯，与「取消」语义一致
+   * 2. 遮罩点击：手指用户唯一顺手的位置
+   *
+   * 桌面端不受影响：`sidebarOpen` 只在窄屏被汉堡按钮翻转，
+   * 且遮罩在 >860px 时由 CSS 隐藏，这里不做断点判断，避免两处各存一份逻辑。
+   */
+  useEffect(() => {
+    if (!sidebarVisible) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') sidebarOpen.set(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [sidebarVisible]);
+
   // 连接成功后自动滚到终端底部，让用户看到第一条命令输出
   useEffect(() => {
     const element = terminalRef.current;
@@ -163,8 +185,16 @@ export const App: FunctionComponent = () => {
 
   return (
     <div class="app" data-sidebar={prefs.sidebarCollapsed ? 'collapsed' : 'expanded'}>
+      {/* 抽屉遮罩：窄屏展开时铺满，点它即关闭；桌面端由 CSS 隐藏 */}
+      <div
+        class="sidebar-scrim"
+        data-open={sidebarVisible}
+        aria-hidden="true"
+        onClick={() => sidebarOpen.set(false)}
+      />
+
       {/* ── 侧边栏 ── */}
-      <aside class="sidebar" data-open={sidebarVisible}>
+      <aside class="sidebar" data-open={sidebarVisible} aria-label="功能分区">
         <div class="sidebar__brand">
           <div class="sidebar__logo" aria-hidden="true">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -245,7 +275,8 @@ export const App: FunctionComponent = () => {
               type="button"
               class="btn btn--ghost btn--sm titlebar__menu"
               onClick={() => sidebarOpen.set(!sidebarVisible)}
-              aria-label="切换侧边栏"
+              aria-label={sidebarVisible ? '收起侧边栏' : '展开侧边栏'}
+              aria-expanded={sidebarVisible}
             >
               <Icon path="M4 6h16M4 12h16M4 18h16" />
             </button>

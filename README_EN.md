@@ -35,7 +35,7 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 57 source files, 15,112 lines (CSS and tests included) |
+| Code size | 57 source files, 15,225 lines (CSS and tests included) |
 | Artifact size | 460 KB across 12 files; first paint roughly 55 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
@@ -644,16 +644,19 @@ npm run preview    # preview the build output locally
 
 ### 7.3a Consistency Checks
 
-Two scripts keep "what the docs say" aligned with "what the code does", so readers never get stale numbers.
+Three scripts keep "what the docs say", "what the palette should be", "does it work at four widths" and "what the code does" aligned, so readers never get stale numbers and a styling change never silently breaks the phone layout.
 
 ```bash
 npm run verify:docs     # README's claims vs the repo (run after build)
 npm run verify:theme    # is the palette still pure grey, is contrast sufficient (run after build)
+npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 (run after build)
 ```
 
 `verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
 
 `verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and whether text/nav/button contrast meets WCAG AA. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
+
+`verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × five states (collapsed, expanded, modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
 
 ### 7.3b CLI and MCP Server
 

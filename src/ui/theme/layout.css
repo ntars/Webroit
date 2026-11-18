@@ -14,6 +14,20 @@
 
 /* ─────────────── 侧边栏 ─────────────── */
 
+/*
+ * 抽屉遮罩。
+ *
+ * 桌面端不出场 —— 那里侧边栏是常驻栅格列，谈「关闭」没有意义。
+ * 所以默认 display:none，只在响应式块里打开。
+ *
+ * 层级压在侧边栏（--z-sidebar: 20）之下而不是之上：
+ * 遮罩是用来接「点空白处」的，本身就该被抽屉盖住一部分；
+ * 压在之上会把抽屉也一起挡暗。
+ */
+.sidebar-scrim {
+  display: none;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -318,9 +332,17 @@
 /* ─────────────── 响应式 ─────────────── */
 
 @media (max-width: 860px) {
+  /*
+   * 抽屉模式下侧边栏是 position:fixed，已经脱离文档流，
+   * 但 grid 列宽不会因为子元素脱流就自动收窄 —— 如果这里仍写
+   * `var(--sidebar-width) 1fr`，主区域会被挤到第二列，只剩
+   * 「视口宽 − 236px」。375px 的手机上主内容区只剩 139px，
+   * 卡片右侧直接被 .content 的 overflow-x:hidden 切掉。
+   * 所以抽屉模式下主区域必须独占整列。
+   */
   .app,
   .app[data-sidebar='collapsed'] {
-    grid-template-columns: var(--sidebar-width) 1fr;
+    grid-template-columns: 1fr;
   }
 
   .sidebar {
@@ -335,6 +357,29 @@
 
   .sidebar[data-open='true'] {
     transform: translateX(0);
+  }
+
+  /*
+   * 窄屏遮罩：抽屉拉开时铺满整屏，接住「点外面就关」这个动作。
+   *
+   * 用 opacity 过渡而不是切 display，是为了让抽屉滑出时背景一起淡回来；
+   * 关掉后要 pointer-events:none，否则隐形的遮罩会吃掉主区域的点击 ——
+   * 那正是本轮在 375px 上抓到的另一类「点不到」。
+   */
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-sidebar) - 1);
+    background: var(--scrim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-normal) var(--ease-out);
+  }
+
+  .sidebar-scrim[data-open='true'] {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .app[data-sidebar='collapsed'] .nav-item__text,
