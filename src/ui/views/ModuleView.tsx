@@ -78,9 +78,11 @@ const GenericModule: FunctionComponent<{ tools: Tool[] }> = ({ tools }) => {
   if (tools.length === 0) {
     return (
       <div class="empty">
-        <div>当前设备没有可用的功能</div>
-        <div style={{ fontSize: '12px' }}>
-          这通常是因为系统版本过低，或厂商限制了相关命令
+        <div>这台设备没有可用的功能</div>
+        <div style={{ fontSize: '12px', marginTop: '4px' }}>
+          功能是否出现取决于连接时探测到的命令支持情况。系统版本过低或厂商裁剪了 adb 命令时，
+          对应功能会整块隐藏。可以换用「终端」分区直接执行命令确认设备当前支持什么；
+          如果这是刚连上的第一屏，等能力探测跑完会自动补全。
         </div>
       </div>
     );

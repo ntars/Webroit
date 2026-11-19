@@ -18,10 +18,12 @@ import type { Tool, ToolResult } from '@/tools/registry';
 import { RISK_LABEL } from '@/tools/registry';
 import { capabilitiesFor } from '@/core/preview';
 import { audited } from '@/core/audit';
+import { explainError, type Explanation } from '@/core/error-copy';
 import { preferences, services, toast } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { useConnect } from '@/ui/hooks/use-connect';
 import { ResultView } from '@/ui/components/ResultView';
+import { ErrorNotice } from '@/ui/components/ErrorNotice';
 
 interface Props {
   tool: Tool;
@@ -45,7 +47,7 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
   });
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ToolResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Explanation | null>(null);
   const [confirmWord, setConfirmWord] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -144,9 +146,14 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
       setResult(outcome);
       toast('success', outcome.summary);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      setError(message);
-      toast('error', message);
+      /*
+       * 失败要分两层说：界面上给完整的「原因 + 出口」，toast 只说原因。
+       * toast 只有一行、几秒后消失，塞不进下一步动作 ——
+       * 所以它负责把人叫住，详细出口由下方的 ErrorNotice 承载。
+       */
+      const explained = explainError(caught);
+      setError(explained);
+      toast('error', explained.reason);
     } finally {
       setRunning(false);
       abortRef.current = null;
@@ -254,11 +261,11 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
             </div>
           )}
 
-          {error && (
-            <div class="notice notice--danger">
-              <strong>执行失败</strong>
-              <p>{error}</p>
-            </div>
+          {error && !running && (
+            <ErrorNotice
+              explanation={error}
+              onRetry={error.retry && confirmOk ? () => void execute() : undefined}
+            />
           )}
 
           {result && <ResultView result={result} />}

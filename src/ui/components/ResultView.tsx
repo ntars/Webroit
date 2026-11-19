@@ -149,7 +149,22 @@ export const ResultView: FunctionComponent<Props> = ({ result }) => {
 /** 按数据形状选择渲染方式 */
 const DataView: FunctionComponent<{ data: unknown }> = ({ data }) => {
   if (Array.isArray(data)) {
-    if (data.length === 0) return <div class="empty">没有数据</div>;
+    /*
+     * 空数组是最容易被写死成「没有数据」的地方。
+     * 但那句话没告诉用户任何有用的东西 —— 是设备没内容，还是筛选筛空了？
+     * 这里给出两条具体出路：重跑一次，或去终端看原始输出。
+     */
+    if (data.length === 0) {
+      return (
+        <div class="empty">
+          <div>这次执行没有返回任何条目</div>
+          <div style={{ fontSize: '12px', marginTop: '4px' }}>
+            可能是设备上确实没有匹配内容，也可能命令被厂商 ROM 拦下了。
+            重新执行一次；仍然为空就切到「终端」分区手动跑同一条命令，看设备返回了什么。
+          </div>
+        </div>
+      );
+    }
 
     // 全是简单值 → 打成标签
     if (data.every(isPrimitive)) {

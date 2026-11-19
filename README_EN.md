@@ -35,7 +35,7 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 59 source files, 15,429 lines (CSS and tests included) |
+| Code size | 62 source files, 16,092 lines (CSS and tests included) |
 | Artifact size | 462 KB across 12 files; first paint roughly 56 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
@@ -662,16 +662,17 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 5 files, 119 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 6 files, 140 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 ### 7.3a Consistency Checks
 
-Three scripts keep "what the docs say", "what the palette should be", "does it work at four widths" and "what the code does" aligned, so readers never get stale numbers and a styling change never silently breaks the phone layout.
+Four scripts keep "what the docs say", "what the palette should be", "does it work at four widths", "does the message say anything useful" and "what the code does" aligned, so readers never get stale numbers, a styling change never silently breaks the phone layout, and no useless error text is handed to the user.
 
 ```bash
 npm run verify:docs     # README's claims vs the repo (run after build)
 npm run verify:theme    # is the palette still pure grey, is contrast sufficient (run after build)
 npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 (run after build)
+npm run verify:copy     # do all four failure modes give a cause and a next step
 ```
 
 `verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
@@ -679,6 +680,8 @@ npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 
 `verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and a full foreground × background contrast matrix (80 pairs, including the terminal palette, accent-on-fill inversion, control border and switch at the 3:1 threshold). Passing `-- --markdown` also prints two ready-to-paste measurement tables generated from the same run, so recolouring means re-running the script rather than transcribing by hand. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
 
 `verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × five states (collapsed, expanded, modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
+
+`verify:copy` guards one rule: every failure message must be useful. Half of it executes `src/core/error-copy.ts` for real and asserts, over 17 authentic strings across four modes (not connected / empty result / command failed / device disconnected), that a cause is present, the next step is an action, no filler phrase like "operation failed" or "unknown error" appears, and the raw device text is retained. The other half scans the source for two ways of bypassing the translation layer: dumping an exception straight into `<p>{error}</p>`, and hand-writing `instanceof Error ? x.message : String(x)` in a dozen places. The latter is harmless on its own, but scattered everywhere it means nobody owns the "turn this into a next step" part. No browser needed; it runs in CI.
 
 ### 7.3b CLI and MCP Server
 
@@ -1024,7 +1027,7 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 141.0 KB | 48.2 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.js` | 147.2 KB | 50.9 KB | Required for first paint: Preact, tool registry, all services and views |
 | `index-*.css` | 35.8 KB | 6.6 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
@@ -1293,7 +1296,7 @@ The project was previously in design and planning. There is no public release be
 | Area | Description | Difficulty |
 |---|---|---|
 | Device compatibility | Post your device model, Android version, ROM, and which tools do not work on your machine in an Issue | Low |
-| Error-code mapping | Add Chinese explanations for common ADB errors, in the error branch of the relevant service | Low |
+| Error-code mapping | Add a rule to the table in `src/core/error-copy.ts`; `npm run verify:copy` checks that the new rule supplies both a cause and a next step | Low |
 | Documentation review | Verify factual consistency between `README.md` and `README_EN.md`, and point out mismatches with the code | Low |
 | New tools | Implement a feature entry against the `Tool` interface, with screenshots and failure behaviour from a real device | Medium |
 | Testing | Add unit tests for the remaining `src/services/` modules; the interfaces already make them testable | Medium |
@@ -1346,7 +1349,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 55 `.ts` / `.tsx` files, 0 places of `any` (five are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 58 `.ts` / `.tsx` files, 0 places of `any` (six are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 

@@ -13,10 +13,12 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Tool } from '@/tools/registry';
 import type { DeviceSnapshot } from '@/services/device.service';
 import type { CpuCore, FocusInfo } from '@/core/utils';
+import { explainError, type Explanation } from '@/core/error-copy';
 import { preferences, services } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
+import { ErrorNotice } from '@/ui/components/ErrorNotice';
 
 interface Props {
   tools: Tool[];
@@ -33,7 +35,7 @@ export const DeviceOverview: FunctionComponent<Props> = ({ tools }) => {
   const prefs = useSignal(preferences);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Explanation | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -50,7 +52,7 @@ export const DeviceOverview: FunctionComponent<Props> = ({ tools }) => {
       ]);
       setOverview({ snapshot, cores, focus });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(explainError(caught));
     } finally {
       setLoading(false);
     }
@@ -111,10 +113,11 @@ export const DeviceOverview: FunctionComponent<Props> = ({ tools }) => {
   return (
     <div class="stack">
       {error && (
-        <div class="notice notice--danger">
-          <strong>读取失败</strong>
-          <p>{error}</p>
-        </div>
+        <ErrorNotice
+          explanation={error}
+          title="读取设备信息失败"
+          onRetry={error.retry ? () => void load() : undefined}
+        />
       )}
 
       {lowBattery && (

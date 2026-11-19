@@ -16,8 +16,9 @@
 import { type FunctionComponent } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
-import { services, toast } from '@/ui/state/app-state';
+import { services } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
+import { explainError } from '@/core/error-copy';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
 
 interface HistoryLine {
@@ -141,9 +142,14 @@ export const TerminalView: FunctionComponent = () => {
       if (result.trim()) append('output', result.trimEnd());
       else append('info', '（无输出）');
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      append('error', message);
-      toast('error', message);
+      /*
+       * 终端里的报错要「就地可读」：用户盯着这个面板敲命令，
+       * 弹到右上角的 toast 会让他视线离开输出。所以两行都写进会话记录：
+       * 一行原文（他熟悉这个形式），一行是翻译后的原因与出口。
+       */
+      const explained = explainError(caught);
+      append('error', explained.raw || explained.reason);
+      append('info', `原因：${explained.reason} 下一步：${explained.next}`);
     } finally {
       setBusy(false);
     }

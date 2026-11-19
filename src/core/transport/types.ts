@@ -65,4 +65,16 @@ export interface DeviceDriver {
   reboot(mode: string): Promise<void>;
   /** 关闭连接 */
   close(): Promise<void>;
+
+  /**
+   * 等待「连接被意外中断」。
+   *
+   * 为什么需要它：拔线之后 `connected` 会变成 false，但那是一个被动字段，
+   * 没有任何人盯着它看 —— 用户看到的是「界面还在，点什么都报错」。
+   * 这个 Promise 在连接真断掉时兑现，让上层能在断线瞬间把界面切回未连接态
+   * 并说明原因，而不是等用户自己发现所有按钮都失灵。
+   *
+   * 可选：命令行侧没有长连接，不必实现。
+   */
+  whenDisconnected?(): Promise<void>;
 }

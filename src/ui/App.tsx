@@ -14,10 +14,11 @@ import { PREVIEW_CAPABILITIES } from '@/core/preview';
 import {
   activeModule,
   clearTerminal,
+  closeConnection,
+  disconnectReason,
   pendingUpdate,
   phase,
   preferences,
-  resetConnection,
   session,
   sidebarOpen,
   switchModule,
@@ -73,25 +74,37 @@ function Icon({ path, size = 16 }: { path: string; size?: number }) {
  * 为什么是「条」而不是「整屏」：用户来这个站点的第一诉求是看清它能做什么，
  * 而不是先被要求插线。整屏连接引导适合做落地页首屏，但会让访客在
  * 看到任何功能之前就流失。所以判断放在这里 —— 浏览随便，执行再说。
+ *
+ * 三种未连接状态要分开说，因为用户该做的事完全不同：
+ * - 从未连接      → 告诉他浏览不受限，随时可连
+ * - 浏览器不支持  → 换浏览器，连按钮都不该给
+ * - 连接被中断    → 必须先说清「刚才断过」，再让他重连
  */
 const ConnectStrip: FunctionComponent<{
   supported: boolean;
   busy: boolean;
   message: string;
+  /** 上一次连接是否意外中断 */
+  lost: boolean;
   onConnect: () => void;
   onShowGuide: () => void;
-}> = ({ supported, busy, message, onConnect, onShowGuide }) => (
-  <div class="connect-strip" data-warn={!supported}>
+}> = ({ supported, busy, message, lost, onConnect, onShowGuide }) => (
+  <div class="connect-strip" data-warn={!supported} data-lost={lost}>
     <div class="connect-strip__text">
-      {supported ? (
-        <>
-          <strong>当前未连接设备</strong>
-          <span>功能与参数都可以先看，执行操作时会提示连接。</span>
-        </>
-      ) : (
+      {!supported ? (
         <>
           <strong>当前浏览器不支持 WebUSB</strong>
           <span>请改用 Chrome 或 Edge 桌面版，并通过 https 或 localhost 打开。</span>
+        </>
+      ) : lost ? (
+        <>
+          <strong>与设备的连接已中断</strong>
+          <span>数据线可能松了，或设备重启过。重新插拔后点「重新连接」；中断时未完成的操作请复查结果。</span>
+        </>
+      ) : (
+        <>
+          <strong>当前未连接设备</strong>
+          <span>功能与参数都可以先看，执行操作时会提示连接。</span>
         </>
       )}
     </div>
@@ -110,6 +123,8 @@ const ConnectStrip: FunctionComponent<{
             <span class="spinner" />
             {message || '连接中…'}
           </>
+        ) : lost ? (
+          '重新连接'
         ) : (
           '连接设备'
         )}
@@ -126,6 +141,7 @@ export const App: FunctionComponent = () => {
   const lines = useSignal(terminalLines);
   const sidebarVisible = useSignal(sidebarOpen);
   const updateHandler = useSignal(pendingUpdate);
+  const lostReason = useSignal(disconnectReason);
   const terminalRef = useRef<HTMLDivElement>(null);
   const [emergency, setEmergency] = useState(isEmergencyRoute);
   const [guide, setGuide] = useState(false);
@@ -236,7 +252,9 @@ export const App: FunctionComponent = () => {
                 type="button"
                 class="btn btn--ghost btn--sm btn--block"
                 onClick={() => {
-                  void currentSession.close().finally(() => resetConnection());
+                  // 主动断开：先清状态再关连接，断线监听据此不弹「意外中断」
+                  closeConnection();
+                  void currentSession.close().catch(() => {});
                 }}
               >
                 断开连接
@@ -314,6 +332,7 @@ export const App: FunctionComponent = () => {
               supported={supported}
               busy={connecting}
               message={connectMessage}
+              lost={lostReason === 'lost'}
               onConnect={() => void connect()}
               onShowGuide={() => setGuide(true)}
             />

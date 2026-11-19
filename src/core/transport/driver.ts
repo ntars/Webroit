@@ -102,6 +102,16 @@ export class Driver implements DeviceDriver {
   }
 
   /**
+   * 等待连接断开。
+   *
+   * 兑现即表示「这次连接结束了」—— 无论原因是拔线、设备重启，
+   * 还是我们自己调了 close()。上层据此收尾，不必轮询 connected 字段。
+   */
+  whenDisconnected(): Promise<void> {
+    return this.#disconnected;
+  }
+
+  /**
    * 执行一条 shell 命令。
    *
    * 两条路径：

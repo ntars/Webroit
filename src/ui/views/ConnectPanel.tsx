@@ -23,6 +23,8 @@ import {
 } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { useConnect } from '@/ui/hooks/use-connect';
+import { explainError } from '@/core/error-copy';
+import { ErrorNotice } from '@/ui/components/ErrorNotice';
 
 interface Props {
   /** 连接成功后的回调 —— 由外层决定是否关闭引导层 */
@@ -65,10 +67,7 @@ export const ConnectPanel: FunctionComponent<Props> = ({ onConnected }) => {
         )}
 
         {currentPhase === 'error' && message && (
-          <div class="notice notice--danger">
-            <strong>连接失败</strong>
-            <p>{message}</p>
-          </div>
+          <ErrorNotice explanation={explainError(message)} title="连接失败" />
         )}
 
         <button

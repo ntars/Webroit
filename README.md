@@ -35,7 +35,7 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 59 个源文件、15,429 行（含 CSS 与测试） |
+| 代码规模 | 62 个源文件、16,092 行（含 CSS 与测试） |
 | 产物规模 | 462 KB / 12 个文件，首屏 gzip 约 56 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
@@ -666,16 +666,17 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 5 个文件、119 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 6 个文件、140 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 ### 7.3a 一致性校验
 
-三份脚本把「文档说的」「配色该是怎样」「四档屏宽下能不能用」和「代码实际的」对齐，避免读者拿到过期数字、也避免改一次样式就把手机端弄坏。
+四份脚本把「文档说的」「配色该是怎样」「四档屏宽下能不能用」「提示语说不说得清」和「代码实际的」对齐，避免读者拿到过期数字、改一次样式就把手机端弄坏，或者把一句没用的报错丢给用户。
 
 ```bash
 npm run verify:docs     # README 的记录 vs 仓库现状（需先 build）
 npm run verify:theme    # 配色是否仍为纯黑白灰、对比度是否达标（需先 build）
 npm run verify:layout   # 375 / 768 / 1024 / 1440 四档宽度的溢出与触控（需先 build）
+npm run verify:copy     # 四类情形的提示是否都给出「原因 + 下一步」
 ```
 
 `verify:docs` 逐项核对可以从仓库现状重算的事实：源文件数与行数、产物文件数与体积、各 chunk 的 gzip 大小、工具数量（26 / 24 / 34 三个口径）、品牌数、`any` 的分布、单元测试文件数与用例数、中英文档的章节数是否一致。它已在 CI 中作为构建后的一步运行，不一致就让部署失败。
@@ -683,6 +684,8 @@ npm run verify:layout   # 375 / 768 / 1024 / 1440 四档宽度的溢出与触控
 `verify:theme` 启动无头 Chrome 读取真实计算样式，检查所有非语义 token 的色度（确认没有混入彩色）、强调色方向（深色主题必须浅、浅色主题必须深）、以及全部前景 × 全部背景的对比度矩阵（80 对色，含终端配色、强调实底反色、控件描边与开关的 3:1 门槛）。加 `-- --markdown` 会额外打印两份可直接粘进文档的实测表格，数字全来自同一次测量，改完配色重跑一次即可，不必手抄。它不进 CI —— 需要 Chrome 环境，作为本地改色后的自检项更合适。
 
 `verify:layout` 同样起无头 Chrome，但量的是几何：四档宽度 × 全部分区 × 折叠 / 展开 / 弹层 / 抽屉五种状态，逐一检查横向溢出、元素越界、被 `overflow-x:hidden` 裁掉、以及中心点被别的图层挡住。窄屏下另查两件事：可点区域是否 ≥ 44px，抽屉展开后点遮罩和按 Esc 能否关掉。越界判定基准取「最近裁剪祖先的右边缘」而不是视口 —— 侧边栏占掉左侧 236px 之后，按视口比会漏掉已经被裁掉的那截。它已进 CI，和 `verify:docs` 一样是构建后的一步。
+
+`verify:copy` 守的是「每句失败提示都得有用」。它分两半：一半把 `src/core/error-copy.ts` 真跑一遍，对「未连接设备 / 无工具结果 / 命令失败 / 设备断开」四类共 17 条真实原文逐条断言——原因非空、下一步是可执行动作、不出现「操作失败」「未知错误」这类零信息短语、原始报错必须保留；另一半静态扫源码，抓两种绕过翻译层的写法：把异常直接塞进 `<p>{error}</p>`，以及各处自己写 `instanceof Error ? x.message : String(x)`。后者本身无害，但散落十几处就意味着没人负责「翻译成下一步」这一步。不需要浏览器，已进 CI。
 
 ### 7.3b 命令行与 MCP Server
 
@@ -1028,7 +1031,7 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 141.0 KB | 48.2 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.js` | 147.2 KB | 50.9 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
 | `index-*.css` | 35.8 KB | 6.6 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
@@ -1282,7 +1285,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 119 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 140 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1297,7 +1300,7 @@ v0.2 之前的**技术债清单**（优先于新功能）：
 | 方向 | 说明 | 难度 |
 |---|---|---|
 | 机型适配 | 在 Issue 中贴出设备型号、Android 版本、ROM，以及哪些工具在你的机器上不可用 | 低 |
-| 错误码映射 | 补充常见 ADB 报错的中文解释，位置在对应 service 的错误处理分支 | 低 |
+| 错误码映射 | 补充常见 ADB 报错的中文解释，往 `src/core/error-copy.ts` 的规则表加一条即可，`npm run verify:copy` 会校验新规则是否同时给出原因与出口 | 低 |
 | 文档校对 | 核对 `README.md` 与 `README_EN.md` 的事实一致性，指出与代码不符之处 | 低 |
 | 新工具 | 按 `Tool` 接口实现一个功能条目，附实机截图与失败表现 | 中 |
 | 测试 | 为 `src/services/` 剩余模块补单元测试，接口化后的依赖使其易测 | 中 |
@@ -1349,7 +1352,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 55 个 `.ts` / `.tsx` 文件、0 处 `any`（含 5 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 58 个 `.ts` / `.tsx` 文件、0 处 `any`（含 6 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

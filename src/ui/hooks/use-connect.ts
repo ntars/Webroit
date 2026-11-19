@@ -16,7 +16,10 @@ import { useState } from 'preact/hooks';
 import { createSession } from '@/core/session/device-session';
 import { connectUsb, isWebUsbSupported } from '@/core/transport/driver';
 import { createServices } from '@/services/index';
+import { messageOf } from '@/core/error-copy';
 import {
+  disconnectReason,
+  loseConnection,
   phase,
   phaseMessage,
   pushOutput,
@@ -51,6 +54,8 @@ export function useConnect(): ConnectResult {
     phase.set('requesting');
     phaseMessage.set('请在弹出的窗口中选择你的安卓设备');
     setMessage('请在弹出的窗口中选择你的安卓设备');
+    // 上一次中断的原因到本次连接就不再成立，先清掉
+    disconnectReason.set(null);
 
     try {
       phase.set('authenticating');
@@ -68,24 +73,34 @@ export function useConnect(): ConnectResult {
       phaseMessage.set('正在探测设备能力…');
       setMessage('正在探测设备能力…');
 
-      services.set(
-        createServices(created, {
-          output: (channel, text) => pushOutput(channel, text),
-          progress: (label, done, total) => pushOutput('info', `${label}：${done} / ${total}`),
-        }),
-      );
+      const createdServices = createServices(created, {
+        output: (channel, text) => pushOutput(channel, text),
+        progress: (label, done, total) => pushOutput('info', `${label}：${done} / ${total}`),
+      });
+      services.set(createdServices);
 
       session.set(created);
       phase.set('ready');
       phaseMessage.set('');
       toast('success', `已连接 ${created.capabilities.model}`);
 
+      /*
+       * 盯着连接是否意外中断。
+       *
+       * 判据是「services 还是不是这一条会话」：主动断开时上层会先把
+       * services 清空，再关连接，所以这条判断能自动区分两种情形 ——
+       * 不需要在关闭路径和这里各维护一个布尔锁，也就没有先后顺序的坑。
+       */
+      void created.driver.whenDisconnected?.().then(() => {
+        if (services.value === createdServices) loseConnection();
+      });
+
       if (created.capabilities.vendorNote) {
         toast('info', created.capabilities.vendorNote);
       }
       return true;
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+      const text = messageOf(error);
       // 用户主动关掉设备选择框不算错误，静默退回待连接状态
       if ((error as Error)?.name === 'AbortError' && /未选择设备/.test(text)) {
         phase.set('idle');

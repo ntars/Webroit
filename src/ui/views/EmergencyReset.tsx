@@ -21,6 +21,7 @@ import { useState } from 'preact/hooks';
 import { createSession } from '@/core/session/device-session';
 import { connectUsb } from '@/core/transport/driver';
 import { createServices } from '@/services/index';
+import { explainError } from '@/core/error-copy';
 import { phase, pushOutput, services, session, toast } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 
@@ -29,7 +30,7 @@ export const EmergencyReset: FunctionComponent = () => {
   const currentPhase = useSignal(phase);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<{ reason: string; next: string } | null>(null);
 
   /** 未连接时先连一次 —— 应急场景不能要求用户先回主页点连接 */
   const ensureConnected = async () => {
@@ -53,7 +54,7 @@ export const EmergencyReset: FunctionComponent = () => {
   const reset = async () => {
     if (busy) return;
     setBusy(true);
-    setFailed(false);
+    setFailure(null);
     setMessage('正在还原…');
 
     try {
@@ -62,10 +63,15 @@ export const EmergencyReset: FunctionComponent = () => {
       setMessage(summary);
       toast('success', summary);
     } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessage(text);
-      setFailed(true);
-      toast('error', text);
+      /*
+       * 应急页最怕「只给一句报错」。用户此刻界面已经错乱，
+       * 唯一的指望就是这个页面，所以必须把下一步说死 ——
+       * 连不上设备时下面还有一段折叠的手动命令清单，文案里直接指向它。
+       */
+      const explained = explainError(error);
+      setMessage(null);
+      setFailure({ reason: explained.reason, next: explained.next });
+      toast('error', explained.reason);
     } finally {
       setBusy(false);
     }
@@ -96,8 +102,19 @@ export const EmergencyReset: FunctionComponent = () => {
           )}
         </button>
 
-        {message && (
-          <div class={failed ? 'notice notice--danger' : 'notice'}>
+        {failure && (
+          <div class="notice notice--danger error-notice" role="alert">
+            <strong>还原没完成</strong>
+            <p class="error-notice__reason">{failure.reason}</p>
+            <p class="error-notice__next">
+              {failure.next}
+              {' '}如果始终连不上，展开下方「连不上时的手动方法」，那里是三条不依赖本页面的命令。
+            </p>
+          </div>
+        )}
+
+        {message && !failure && (
+          <div class="notice">
             <p>{message}</p>
           </div>
         )}

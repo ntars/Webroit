@@ -16,10 +16,12 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 
 import type { BloatState } from '@/services/vendor.service';
 import { vendorMeta, type Tool } from '@/tools/registry';
+import { explainError, type Explanation } from '@/core/error-copy';
 import { services, toast } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
+import { ErrorNotice } from '@/ui/components/ErrorNotice';
 
 interface Props {
   tools: Tool[];
@@ -29,7 +31,7 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
   const current = useSignal(services);
   const [items, setItems] = useState<BloatState[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Explanation | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
       // 默认不勾选任何项 —— 停用是变更操作，不该有默认选中
       setSelected(new Set());
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(explainError(caught));
     } finally {
       setLoading(false);
     }
@@ -101,7 +103,8 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
       setSelected(new Set());
       await scan();
     } catch (caught) {
-      toast('error', caught instanceof Error ? caught.message : String(caught));
+      const explained = explainError(caught);
+      toast('error', explained.reason);
     } finally {
       setBusy(false);
     }
@@ -150,10 +153,11 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
       </div>
 
       {error && (
-        <div class="notice notice--danger">
-          <strong>扫描失败</strong>
-          <p>{error}</p>
-        </div>
+        <ErrorNotice
+          explanation={error}
+          title="扫描系统组件失败"
+          onRetry={error.retry ? () => void scan() : undefined}
+        />
       )}
 
       {selected.size > 0 && (

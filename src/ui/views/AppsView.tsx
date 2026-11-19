@@ -15,10 +15,12 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 
 import type { PackageEntry } from '@/services/app.service';
 import type { Tool } from '@/tools/registry';
+import { explainError, type Explanation } from '@/core/error-copy';
 import { services, toast } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
+import { ErrorNotice } from '@/ui/components/ErrorNotice';
 
 interface Props {
   tools: Tool[];
@@ -30,7 +32,7 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
   const current = useSignal(services);
   const [entries, setEntries] = useState<PackageEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Explanation | null>(null);
   const [filter, setFilter] = useState<Filter>('third');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -44,7 +46,7 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
     try {
       setEntries(await current.apps.listWithState());
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(explainError(caught));
     } finally {
       setLoading(false);
     }
@@ -98,7 +100,8 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
       );
       toast('success', `${name} ${action === 'enable' ? '已启用' : action === 'disable' ? '已冻结' : '已停止'}`);
     } catch (caught) {
-      toast('error', caught instanceof Error ? caught.message : String(caught));
+      const explained = explainError(caught);
+      toast('error', explained.reason);
     } finally {
       setBusy(null);
     }
@@ -126,7 +129,8 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
       setSelected(new Set());
       if (action === 'uninstall') await load();
     } catch (caught) {
-      toast('error', caught instanceof Error ? caught.message : String(caught));
+      const explained = explainError(caught);
+      toast('error', explained.reason);
     } finally {
       setBusy(null);
     }
@@ -237,9 +241,12 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
         )}
 
         {error && (
-          <div class="notice notice--danger" style={{ margin: '12px' }}>
-            <strong>读取失败</strong>
-            <p>{error}</p>
+          <div style={{ margin: '12px' }}>
+            <ErrorNotice
+              explanation={error}
+              title="读取应用列表失败"
+              onRetry={error.retry ? () => void load() : undefined}
+            />
           </div>
         )}
 

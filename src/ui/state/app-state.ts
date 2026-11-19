@@ -66,6 +66,13 @@ export const sidebarOpen = signal<boolean>(false);
  * 界面只负责在用户点击时把它调起来，不需要知道 Service Worker 的任何细节。
  */
 export const pendingUpdate = signal<(() => void) | null>(null);
+/**
+ * 上一次连接为什么结束。
+ *
+ * 只区分「用户主动断开」与「意外中断」：前者不需要提示，后者必须提示 ——
+ * 否则用户会对着一个已经失效的界面继续点。
+ */
+export const disconnectReason = signal<'user' | 'lost' | null>(null);
 
 /* ─────────────────────── 动作 ─────────────────────── */
 
@@ -131,4 +138,23 @@ export function resetConnection(): void {
   phase.set('idle');
   phaseMessage.set('');
   progress.set(null);
+}
+
+/**
+ * 连接意外中断时的收尾。
+ *
+ * 与 resetConnection 的区别只有一个：留一条原因，让界面能说清
+ * 「为什么突然回到未连接」。少了这条，用户拔线后看到的是一切归零的界面，
+ * 会误以为工具自己坏了。
+ */
+export function loseConnection(): void {
+  resetConnection();
+  disconnectReason.set('lost');
+  toast('error', '与设备的连接已中断，请重新插拔数据线后连接');
+}
+
+/** 用户主动断开：清掉原因标记，界面不弹提示 */
+export function closeConnection(): void {
+  disconnectReason.set('user');
+  resetConnection();
 }

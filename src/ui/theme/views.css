@@ -64,6 +64,55 @@
   color: var(--accent-text);
 }
 
+/*
+ * 错误提示块：三段结构（原因 / 出口 / 原文）。
+ *
+ * 「出口」那一段刻意与原因同色同字号 —— 它和原因同样重要，
+ * 把下一步做成浅灰小字，等于告诉用户「这句可以跳过」，
+ * 而实际上用户真正需要读的就是这句。
+ */
+.error-notice__reason {
+  font-weight: 500;
+}
+
+.error-notice__next {
+  margin-top: var(--space-1);
+}
+
+/* 「下一步」标签：不换行、不抢眼，但不能被后文吞掉 */
+.error-notice__label {
+  display: inline-block;
+  margin-right: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 0;
+}
+
+.error-notice__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.error-notice__raw {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
 /* ─────────────── 指标块 ─────────────── */
 
 .metrics {
@@ -1199,6 +1248,22 @@
 .connect-strip[data-warn='true'] {
   border-color: var(--danger-line);
   background: var(--danger-subtle);
+}
+
+/*
+ * 断线态。
+ *
+ * 用警告色而不是危险色：断线是「需要你插一下线」，不是「你搞坏了什么」。
+ * 危险色会让人以为操作失败了，而实际上多半只是线松了。
+ */
+.connect-strip[data-lost='true'] {
+  border-color: var(--warning-line);
+  background: var(--warning-subtle);
+}
+
+.connect-strip[data-lost='true'] .connect-strip__text strong,
+.connect-strip[data-lost='true'] .connect-strip__text span {
+  color: var(--warning);
 }
 
 .connect-strip__text {

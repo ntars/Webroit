@@ -91,6 +91,12 @@ jobs:
         # 量的是用户真正会加载的那份 CSS 与 DOM。
         run: npm run verify:layout
 
+      - name: 校验界面文案
+        # 不需要浏览器，纯文本 + 运行一遍翻译层：
+        # 四类情形（未连接 / 无结果 / 命令失败 / 设备断开）的提示是否都给出
+        # 「原因 + 下一步」，以及有没有界面绕过翻译层直出裸异常。
+        run: npm run verify:copy
+
       - name: 配置 Pages
         uses: actions/configure-pages@v5
 

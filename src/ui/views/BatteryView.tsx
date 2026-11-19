@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { PowerSample } from '@/services/battery.service';
 import { BatteryService } from '@/services/battery.service';
 import type { Tool } from '@/tools/registry';
+import { explainError } from '@/core/error-copy';
 import { services, toast } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
@@ -80,8 +81,9 @@ export const BatteryView: FunctionComponent<Props> = ({ tools }) => {
         },
       });
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      if (!/已取消|abort/i.test(message)) toast('error', message);
+      // 用户主动停止采样不算故障，不弹错误提示
+      const explained = explainError(caught);
+      if (explained.kind !== 'cancelled') toast('error', explained.reason);
     } finally {
       setWatching(false);
       abortRef.current = null;
@@ -269,7 +271,15 @@ const PowerChart: FunctionComponent<{ samples: PowerSample[] }> = ({ samples }) 
   })[];
 
   if (points.length < 2) {
-    return <div class="empty">有效数据点不足，无法绘制曲线</div>;
+    return (
+      <div class="empty">
+        <div>有效数据点不足，画不出曲线</div>
+        <div style={{ fontSize: '12px', marginTop: '4px' }}>
+          设备没有返回电流值，常见于不报告瞬时功耗的机型。继续采样会重新尝试；
+          也可以改用「电池诊断」里的详情读一次完整状态。
+        </div>
+      </div>
+    );
   }
 
   const watts = points.map((sample) => sample.watt);
