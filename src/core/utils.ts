@@ -323,3 +323,41 @@ export function checkAbort(signal?: AbortSignal): void {
     throw signal.reason ?? new DOMException('操作已停止', 'AbortError');
   }
 }
+
+/**
+ * 让一次「可能永远不返回」的异步调用变得可中止。
+ *
+ * 为什么不能只靠把 signal 透传给底层：USB 链路断掉以后，底层 `spawn()`
+ * 返回的 Promise 可能既不 resolve 也不 reject —— 数据线都拔了，谁来兑现它？
+ * 于是 `await batch()` 就一直挂着，用户看到「拔线后界面还转了两分钟」。
+ *
+ * 这里做的是「谁先出结果算谁」：正常完成就返回结果，signal 先响就抛
+ * AbortError。注意原 Promise 不会被真正取消（做不到），但调用方拿回了
+ * 控制权，不会卡死在一次已经没意义的等待上；底层残留的 Promise 由
+ * 驱动自己的断线清理负责收尾。
+ */
+export function raceAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) {
+    // 晚到的失败不该变成 unhandled rejection
+    void work.catch(() => {});
+    return Promise.reject(signal.reason ?? new DOMException('操作已停止', 'AbortError'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      void work.catch(() => {});
+      reject(signal.reason ?? new DOMException('操作已停止', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}

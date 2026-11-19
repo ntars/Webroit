@@ -19,7 +19,25 @@
 
 import type { ShellContext } from '@/core/shell';
 import type { VendorId } from '@/tools/registry';
-import { quote } from '@/core/utils';
+import { quote, raceAbort } from '@/core/utils';
+
+/** 批量中途停下时，剩余项的原因文案（与 app.service 同口径） */
+const VENDOR_STOPPED = '连接已中断，这一条没有执行';
+
+/**
+ * 品牌组件的单条批量结果。
+ *
+ * 与 `app.service` 的 `BatchResult` 形状不同（这里用 `package`/`ok`），
+ * 所以各自具名一次；但两处都带 `skipped`，含义相同：
+ * 命令没发出去，不是设备拒绝。
+ */
+export interface VendorBatchResult {
+  package: string;
+  ok: boolean;
+  message: string;
+  /** 连接中途断了，这一条没有执行 */
+  skipped?: boolean;
+}
 
 /** 一个可停用的组件 */
 export interface BloatItem {
@@ -402,18 +420,30 @@ export class VendorService {
    * 逐条执行并收集失败原因 —— 某些组件在特定 ROM 版本上受保护，
    * 整批一起发会中途抛错导致后面的漏掉。
    */
-  async disable(packages: string[]): Promise<{ package: string; ok: boolean; message: string }[]> {
+  async disable(packages: string[]): Promise<VendorBatchResult[]> {
     const allowed = new Set(PROFILES[this.#vendor].bloat.map((item) => item.package));
-    const results: { package: string; ok: boolean; message: string }[] = [];
+    const results: VendorBatchResult[] = [];
 
-    for (const name of packages) {
+    for (let i = 0; i < packages.length; i++) {
+      const name = packages[i];
+      // 连接已结束：剩余项一次性标记「未执行」并退出，不再朝死链路发命令
+      if (this.#shell.aborted) {
+        for (const rest of packages.slice(i)) {
+          results.push({ package: rest, ok: false, skipped: true, message: VENDOR_STOPPED });
+        }
+        break;
+      }
       // 只允许停用清单内的组件，防止有人通过改 UI 传入任意包名
       if (!allowed.has(name)) {
         results.push({ package: name, ok: false, message: '不在当前品牌的可停用清单内' });
         continue;
       }
       try {
-        const output = await this.#shell.mutation(`pm disable-user --user 0 ${quote(name)}`);
+        // 正在执行的这一条也要能被断线打断：底层 spawn 可能永远不兑现
+        const output = await raceAbort(
+          this.#shell.mutation(`pm disable-user --user 0 ${quote(name)}`),
+          this.#shell.signal,
+        );
         results.push({ package: name, ok: true, message: output.trim() || '已停用' });
       } catch (error) {
         results.push({
@@ -427,17 +457,28 @@ export class VendorService {
   }
 
   /** 批量恢复组件 */
-  async enable(packages: string[]): Promise<{ package: string; ok: boolean; message: string }[]> {
+  async enable(packages: string[]): Promise<VendorBatchResult[]> {
     const allowed = new Set(PROFILES[this.#vendor].bloat.map((item) => item.package));
-    const results: { package: string; ok: boolean; message: string }[] = [];
+    const results: VendorBatchResult[] = [];
 
-    for (const name of packages) {
+    for (let i = 0; i < packages.length; i++) {
+      const name = packages[i];
+      // 同上：连接断了就停手，剩余项标记「未执行」
+      if (this.#shell.aborted) {
+        for (const rest of packages.slice(i)) {
+          results.push({ package: rest, ok: false, skipped: true, message: VENDOR_STOPPED });
+        }
+        break;
+      }
       if (!allowed.has(name)) {
         results.push({ package: name, ok: false, message: '不在当前品牌的可恢复清单内' });
         continue;
       }
       try {
-        const output = await this.#shell.mutation(`pm enable ${quote(name)}`);
+        const output = await raceAbort(
+          this.#shell.mutation(`pm enable ${quote(name)}`),
+          this.#shell.signal,
+        );
         results.push({ package: name, ok: true, message: output.trim() || '已恢复' });
       } catch (error) {
         results.push({

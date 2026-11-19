@@ -11,7 +11,7 @@
  */
 
 import type { ShellContext } from '@/core/shell';
-import { assertPackageName, quote } from '@/core/utils';
+import { assertPackageName, quote, raceAbort } from '@/core/utils';
 
 /** 应用条目 */
 export interface PackageEntry {
@@ -48,7 +48,22 @@ export interface BatchResult {
   name: string;
   success: boolean;
   message: string;
+  /**
+   * 这一条根本没执行。
+   *
+   * 与 `success: false` 分开的原因：连接在批量途中中断时，剩下的项既没成功
+   * 也没失败 —— 命令压根没发出去。把两者混成一个「失败」，用户会去排查
+   * 那些包的权限或存储问题，而真正的原因是线掉了。
+   */
+  skipped?: boolean;
 }
+
+/**
+ * 批量中途停下时，剩余项的原因文案。
+ *
+ * 写清「没执行」而不是「失败」，用户才知道不用去查这些包本身。
+ */
+const STOPPED_MESSAGE = '连接已中断，这一条没有执行';
 
 /** uninstallLock 的 service call 事务号，按 API 等级对应 */
 const UNINSTALL_LOCK_TRANSACTION: Record<number, number> = {
@@ -278,35 +293,60 @@ export class AppService {
   /**
    * 批量操作。逐条执行并收集结果，单个失败不影响后续。
    * 通过 onProgress 回传进度，UI 可以显示进度条。
+   *
+   * **连接中断即停手**：每条之前检查 `#shell.aborted`，一旦为真就把剩余项
+   * 标记为「未执行」并退出循环，不再向已经断开的链路发命令。
+   *
+   * 为什么这件事不能只靠 signal：单条命令自己会响应中断（`shell()` 内部
+   * 把 signal 透给驱动），但**循环是同步的**，前一条抛错被 catch 之后
+   * 它会毫不犹豫地开始下一条。拔线时那个 catch 里捕获的很可能是
+   * 「设备已断开」，然后循环继续跑 50 条 —— 每条都要等 USB 超时。
+   * 所以需要一次显式的开关检查，而不是指望异常自己把循环打断。
    */
   async batch(
     names: string[],
     action: 'enable' | 'disable' | 'uninstall' | 'clearData' | 'forceStop',
     onProgress?: (done: number, total: number, current: string) => void,
   ): Promise<BatchResult[]> {
+    /** 单条动作，抽成闭包是为了能整体 race 一次取消信号 */
+    const runOne = async (name: string): Promise<string> => {
+      switch (action) {
+        case 'enable':
+          return this.enable(name);
+        case 'disable':
+          return this.disable(name);
+        case 'uninstall':
+          return this.uninstall(name);
+        case 'clearData':
+          return this.clearData(name);
+        case 'forceStop':
+          return this.forceStop(name);
+      }
+    };
+
     const results: BatchResult[] = [];
     for (let i = 0; i < names.length; i++) {
       const name = names[i];
+
+      // 连接已结束：剩下的一次性标记为「未执行」并退出，不再朝死链路发命令
+      if (this.#shell.aborted) {
+        for (const rest of names.slice(i)) {
+          results.push({ name: rest, success: false, skipped: true, message: STOPPED_MESSAGE });
+        }
+        break;
+      }
+
       onProgress?.(i, names.length, name);
       try {
-        let output: string;
-        switch (action) {
-          case 'enable':
-            output = await this.enable(name);
-            break;
-          case 'disable':
-            output = await this.disable(name);
-            break;
-          case 'uninstall':
-            output = await this.uninstall(name);
-            break;
-          case 'clearData':
-            output = await this.clearData(name);
-            break;
-          case 'forceStop':
-            output = await this.forceStop(name);
-            break;
-        }
+        /*
+         * 单条动作包成可中止的。
+         *
+         * 为什么循环里的 `aborted` 检查还不够：那条检查只在两条命令**之间**
+         * 生效，而拔线时正卡着的是当前这一条 —— 底层 spawn 的 Promise
+         * 可能永远不兑现（数据线都没了，谁来回它？）。所以要 race 一次信号，
+         * 让断线能立刻把控制权拿回来，而不是等 USB 超时。
+         */
+        const output = await raceAbort(runOne(name), this.#shell.signal);
         results.push({ name, success: true, message: output.trim() || '成功' });
       } catch (error) {
         results.push({
@@ -316,7 +356,11 @@ export class AppService {
         });
       }
     }
-    onProgress?.(names.length, names.length, '');
+    /*
+     * 中途停下时不要把进度推到满 —— 那会让进度条走到 100% 然后弹一条
+     * 「剩余 26 个没执行」，两句话互相打脸。停下就停在停下的位置。
+     */
+    if (!this.#shell.aborted) onProgress?.(names.length, names.length, '');
     return results;
   }
 }

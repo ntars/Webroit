@@ -251,8 +251,20 @@ export function resetAllPreferences(): void {
   toast('success', '偏好已恢复默认');
 }
 
-/** 重置连接状态 */
+/**
+ * 重置连接状态。
+ *
+ * **先中止在途命令，再清状态** —— 顺序不能反。理由是本轮实测出来的：
+ * `services` 一旦置空，视图层就再也拿不到那个 `ShellContext`，
+ * 它内部那个 AbortController 从此没人能触发。于是拔线瞬间正在跑的批量操作
+ * 变成孤儿：当前那条命令等 USB 超时才返回，`batch()` 的 for 循环
+ * 接着处理下一条，一条条发往已经死掉的链路。用户看到「拔线后还转了两分钟」。
+ *
+ * 三条收尾路径（意外中断 / 用户主动断开 / 切换设备重建）都经过这里，
+ * 所以中止只需写在这一处，不必每个调用点各写一遍 —— 写在外面必然漏。
+ */
 export function resetConnection(): void {
+  services.value?.shell.abort(new Error('设备连接已结束'));
   session.set(null);
   services.set(null);
   phase.set('idle');

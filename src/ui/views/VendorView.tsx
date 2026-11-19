@@ -113,6 +113,7 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
           target: item.package,
           ok: item.ok,
           message: item.message,
+          skipped: item.skipped,
         })),
         action === 'enable' ? '恢复' : '停用',
       );

@@ -17,6 +17,7 @@
  */
 
 import type { Services } from '@/services/index';
+import type { VendorBatchResult } from '@/services/vendor.service';
 import type { BatchResult } from '@/services/app.service';
 import { runMutation, type MutationOutcome } from '@/ui/state/actions';
 
@@ -155,7 +156,7 @@ export function uninstallApps(services: Services, names: string[]): Promise<Outc
 export function disableVendor(
   services: Services,
   packages: string[],
-): Promise<Outcome<{ package: string; ok: boolean; message: string }[]>> {
+): Promise<Outcome<VendorBatchResult[]>> {
   return runMutation(
     ctxOf(services),
     {
@@ -178,7 +179,7 @@ export function disableVendor(
 export function enableVendor(
   services: Services,
   packages: string[],
-): Promise<Outcome<{ package: string; ok: boolean; message: string }[]>> {
+): Promise<Outcome<VendorBatchResult[]>> {
   return runMutation(
     ctxOf(services),
     {

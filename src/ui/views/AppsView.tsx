@@ -152,6 +152,8 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
           target: item.name,
           ok: item.success,
           message: item.message,
+          // 连接中途断了没跑的项要单独说，不能混成「失败」
+          skipped: item.skipped,
         })),
         ACTION_DONE[action].replace('已', ''),
       );

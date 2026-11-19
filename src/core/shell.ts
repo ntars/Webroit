@@ -121,6 +121,35 @@ export class ShellContext {
     this.#abort.abort(reason);
   }
 
+  /**
+   * 这个上下文是否已被中止。
+   *
+   * 存在的理由是一个实测出来的缺口：批量操作是「一轮 for 循环里逐条 await」，
+   * 每条命令自己会响应 signal，但**循环本身不响应** —— 拔线之后正在跑的那条
+   * 会很快失败，循环却接着处理下一条，于是后面 N 条命令一条条发往一条已经
+   * 死掉的 USB 链路，每条都要等到超时才返回。用户看到的是「拔线后界面还在
+   * 转，转了两分钟」，审计里则躺着 N 条注定失败的记录。
+   *
+   * 所以循环需要一个「该不该继续下一条」的判据。用只读布尔而不是让循环
+   * 自己 await signal：循环体是同步的，加 await 会改变调用时序，
+   * 而这里要的只是一次开关检查。
+   */
+  get aborted(): boolean {
+    return this.#abort.signal.aborted;
+  }
+
+  /**
+   * 这个上下文的取消信号，供调用方把「可能永远不返回的一次调用」包成可中止的。
+   *
+   * 为什么光有 `aborted` 布尔不够：批量循环的判据只在两条命令**之间**生效，
+   * 而真正卡人的是正在等的那一条 —— USB 链路死掉时底层 `spawn` 的 Promise
+   * 可能既不 resolve 也不 reject，signal 透下去也没用。所以循环需要
+   * `shell.signal` 去和这次调用 `Promise.race`，谁先有结果算谁。
+   */
+  get signal(): AbortSignal {
+    return this.#abort.signal;
+  }
+
   /** 每次调用都拿一个新的复合 signal：外部 signal 与内部 abort 谁先触发都生效 */
   #composeSignal(signal?: AbortSignal): AbortSignal {
     if (!signal) return this.#abort.signal;

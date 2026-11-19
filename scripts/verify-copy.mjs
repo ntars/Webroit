@@ -970,6 +970,119 @@ if (actionsCode) {
   }
 }
 
+/* ─────────────── H. 断线必须真的让在途操作停手 ─────────────── */
+
+/*
+ * G 段守的是「结果说不说得清」，H 段守的是更前面的一步：
+ * **说清结果之前，那批操作得先停下来**。
+ *
+ * 实况（本轮实测）：拔线时 `batch()` 的 for 循环没有任何中断判据。
+ * 正在跑的那条命令会失败（底层报 device offline），catch 把它记成一条失败，
+ * 然后循环毫不犹豫地开始下一条 —— 后面 7 条命令一条条发往已经死掉的 USB
+ * 链路，每条都要等到超时才返回。用户看到「拔线后界面还在转」，
+ * 审计里则躺着 7 条注定失败的记录，而不是「7 条没执行」。
+ *
+ * 更隐蔽的一层：光加布尔检查也不够。真正的卡点是**正在等的那一条** ——
+ * 数据线都拔了，谁来兑现底层 spawn 的 Promise？所以除了循环里的开关判断，
+ * 还需要把单条调用 race 一次取消信号。
+ *
+ * 断言四环：
+ *   1. 连接收尾时真的调用了 `abort()`（否则信号永远不响）
+ *   2. 批量循环里有 `aborted` 判据（两条命令之间停手）
+ *   3. 单条调用被 race 过（正在跑的那条也能被打断）
+ *   4. 剩余项标 `skipped`，播报不把它算成失败
+ */
+const shellCode = codeOf('src/core/shell.ts') ?? '';
+const stateCode = codeOf('src/ui/state/app-state.ts') ?? '';
+const appServiceCode = codeOf('src/services/app.service.ts') ?? '';
+const vendorServiceCode = codeOf('src/services/vendor.service.ts') ?? '';
+
+// 环 1：连接重置路径必须先中止再清状态
+const abortsOnReset = /services\.value\?\.shell\.abort\s*\(/.test(stateCode);
+const resetFn = /export function resetConnection\s*\([^)]*\)\s*:\s*void\s*\{([\s\S]{0,600}?)\n\}/.exec(
+  stateCode,
+);
+const abortBeforeClear = Boolean(
+  resetFn && resetFn[1].indexOf('.abort(') >= 0 &&
+    resetFn[1].indexOf('.abort(') < resetFn[1].indexOf('services.set(null)'),
+);
+
+if (!abortsOnReset || !abortBeforeClear) {
+  fail(
+    '断线即中止在途命令',
+    abortsOnReset ? 'abort() 位置在清空 services 之后' : 'resetConnection 未调用 abort()',
+    '先 abort 再清状态',
+    'services 一置空，那个 ShellContext 就再没人能触发；在途批量会一路空转到超时',
+  );
+} else {
+  pass('断线即中止在途命令', 'resetConnection 先 abort(shell) 再清状态，三条收尾路径共用');
+}
+
+// 环 2：批量循环里有中断判据
+const batchAbortedCheck = /this\.#shell\.aborted/.test(appServiceCode);
+const vendorAbortedCheck = /this\.#shell\.aborted/.test(vendorServiceCode);
+const shellExposesAborted = /get aborted\s*\(\s*\)\s*:\s*boolean/.test(shellCode);
+
+if (!shellExposesAborted) {
+  fail('批量循环可判定中断', 'ShellContext 暴露 aborted', '缺失', '循环没有「该不该继续下一条」的判据');
+} else if (!batchAbortedCheck || !vendorAbortedCheck) {
+  fail(
+    '批量循环可判定中断',
+    `app.service ${batchAbortedCheck} / vendor.service ${vendorAbortedCheck}`,
+    '两处都要有 aborted 判据',
+    '少一处，那条批量路径拔线后仍会逐条空转到超时',
+  );
+} else {
+  pass('批量循环可判定中断', 'app.service 与 vendor.service 均在每条前检查 aborted');
+}
+
+// 环 3：正在执行的那一条也要能被 race 打断
+const shellExposesSignal = /get signal\s*\(\s*\)\s*:\s*AbortSignal/.test(shellCode);
+const racesBatch = /raceAbort\s*\(\s*runOne\s*\(/.test(appServiceCode);
+const racesVendor = (vendorServiceCode.match(/raceAbort\s*\(/g) ?? []).length >= 2;
+
+if (!shellExposesSignal) {
+  fail('在途单条可被打断', 'ShellContext 暴露 signal', '缺失', '没有取消信号，卡住的那条只能等超时');
+} else if (!racesBatch || !racesVendor) {
+  fail(
+    '在途单条可被打断',
+    `app.service race ${racesBatch} / vendor.service 两处 race ${racesVendor}`,
+    '正在执行的调用也要 race 信号',
+    '循环里的开关只在两条之间生效，卡在第 3 条时会永远等下去',
+  );
+} else {
+  pass('在途单条可被打断', 'app.service 与 vendor.service 的批量调用均 race 了取消信号');
+}
+
+// 环 4：剩余项标 skipped，播报不混成失败
+const marksSkipped = /skipped:\s*true/.test(appServiceCode) && /skipped:\s*true/.test(vendorServiceCode);
+const reportKnowsSkipped = /pickSkipped/.test(batchReportCode ?? '');
+/*
+ * 光有函数名不算数 —— 反向探针把 `pickSkipped` 改成 `return []` 之后，
+ * `reportKnowsSkipped` 仍是 true，脚本照旧全绿（只有单测打红）。
+ * 所以这里要看函数体里真的按 skipped 筛。
+ */
+const pickSkippedBody = /export function pickSkipped[\s\S]{0,220}?\n\}/.exec(batchReportCode ?? '');
+const pickSkippedFilters = Boolean(pickSkippedBody && /skipped/.test(pickSkippedBody[0]));
+const viewsPassSkipped = /skipped:\s*item\.(skipped|success)/.test(
+  (codeOf('src/ui/views/AppsView.tsx') ?? '') + (codeOf('src/ui/views/VendorView.tsx') ?? ''),
+);
+
+if (!marksSkipped) {
+  fail('未执行与失败分开', '批量结果标记 skipped', '缺失', '剩余项会被当成真失败，用户去查包权限而真因是掉线');
+} else if (!reportKnowsSkipped || !pickSkippedFilters) {
+  fail(
+    '未执行与失败分开',
+    `播报层识别 skipped ${reportKnowsSkipped} / 真的按 skipped 筛 ${pickSkippedFilters}`,
+    '两项都要',
+    '函数名叫 pickSkipped 但返回空数组，摘要仍会把未执行算作失败',
+  );
+} else if (!viewsPassSkipped) {
+  fail('未执行与失败分开', '视图层把 skipped 交给播报层', '未透传', '服务层标了但播报看不到，等于没标');
+} else {
+  pass('未执行与失败分开', '服务层标 skipped、播报层单列、零信息短语不回流');
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

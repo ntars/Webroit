@@ -24,6 +24,14 @@ export interface BatchOutcome {
   ok: boolean;
   /** 成功时为设备回显，失败时为错误原文 */
   message: string;
+  /**
+   * 这一条没有执行（连接中途断了，命令没发出去）。
+   *
+   * 与「失败」分开的理由：失败意味着命令到了设备、设备拒绝了，用户该去查
+   * 权限、存储、签名；未执行意味着命令压根没到设备，用户该去查数据线。
+   * 混成一类，提示条就会把人往错误的方向指。
+   */
+  skipped?: boolean;
 }
 
 /**
@@ -48,9 +56,24 @@ export function pickFailures(outcomes: readonly BatchOutcome[]): BatchOutcome[] 
   return outcomes.filter((item) => !item.ok);
 }
 
+/**
+ * 取「没执行」的项。
+ *
+ * 与失败分开数：一批 30 个操作到第 4 个时断线，剩下的 26 个既没成也没败，
+ * 说成「失败 26 个」会让人去排查 26 个包，而真正该做的是插回数据线重来。
+ */
+export function pickSkipped(outcomes: readonly BatchOutcome[]): BatchOutcome[] {
+  return outcomes.filter((item) => item.skipped === true);
+}
+
 /** 成功条数 */
 export function countOk(outcomes: readonly BatchOutcome[]): number {
   return outcomes.reduce((sum, item) => (item.ok ? sum + 1 : sum), 0);
+}
+
+/** 真正失败（命令到了设备但被拒绝）的条数，不含未执行 */
+export function countFailed(outcomes: readonly BatchOutcome[]): number {
+  return outcomes.reduce((sum, item) => (!item.ok && item.skipped !== true ? sum + 1 : sum), 0);
 }
 
 /** 一段播报：提示条用摘要，终端用明细 */
@@ -66,6 +89,10 @@ export interface BatchReport {
 /**
  * 生成一段完整播报。
  *
+ * 三种结果分别有话说：全成、部分失败、连接中途断了剩下没跑。
+ * 第三种最容易写错 —— 把「没执行」算进「失败」，用户会去查 26 个包的权限，
+ * 而实际原因只是数据线松了。
+ *
  * @param outcomes 归一化后的结果数组
  * @param actionLabel 动作名，如「冻结」「卸载」「恢复」
  */
@@ -75,10 +102,36 @@ export function buildBatchReport(
 ): BatchReport {
   const total = outcomes.length;
   const ok = countOk(outcomes);
-  const failures = pickFailures(outcomes);
+  const skipped = pickSkipped(outcomes).length;
+  const failures = pickFailures(outcomes).filter((item) => item.skipped !== true);
 
-  if (failures.length === 0) {
+  if (failures.length === 0 && skipped === 0) {
     return { tone: 'success', summary: `${total} 个${actionLabel}完成`, lines: [] };
+  }
+
+  /*
+   * 连接中途断掉：这是三种结局里唯一「停止原因与目标本身无关」的一种。
+   * 摘要必须先说清这一点，再报已完成的数量 —— 否则用户会去排查设备。
+   */
+  if (skipped > 0) {
+    const done = failures.length > 0
+      ? `${total} 个${actionLabel}：成功 ${ok} 个，失败 ${failures.length} 个`
+      : `${total} 个${actionLabel}：成功 ${ok} 个`;
+    const summary =
+      `${done}，中途连接中断，剩余 ${skipped} 个没有执行。` +
+      `重新插拔数据线并连接后，对这 ${skipped} 个再执行一次即可；已完成的部分不会重复生效。`;
+    const names = pickSkipped(outcomes)
+      .slice(0, MAX_LISTED_FAILURES)
+      .map((item) => item.target)
+      .join('、');
+    const more = skipped > MAX_LISTED_FAILURES ? ` 等（共 ${skipped} 个）` : '';
+    const lines = [
+      `[未执行] 连接中断，以下 ${skipped} 个没有发出命令：${names}${more}`,
+      ...failures
+        .slice(0, MAX_LISTED_FAILURES)
+        .map((item) => `[失败] ${item.target}：${cleanMessage(item.message)}`),
+    ];
+    return { tone: 'error', summary, lines };
   }
 
   /*
