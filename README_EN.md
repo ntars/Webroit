@@ -676,7 +676,9 @@ Four scripts keep "what the docs say", "what the palette should be", "does it wo
 npm run verify:docs     # README's claims vs the repo (run after build)
 npm run verify:theme    # is the palette still pure grey, is contrast sufficient (run after build)
 npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 (run after build)
-npm run verify:copy     # do all failure modes give a cause and a next step
+npm run verify:copy     # do all failure modes give a cause and a next step, and do batch failures have an outlet
+npm run verify:confirm  # confirm sheet: request -> sheet -> click -> promise settles (needs Chrome)
+npm run verify:batch    # batch report: does the summary reach the toast and each failure become its own line (needs Chrome)
 ```
 
 `verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, the Service Worker precache manifest, the contrast pair matrix, the Preferences panel chain (fields → mounted → theme written to the DOM → documented wording), and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.

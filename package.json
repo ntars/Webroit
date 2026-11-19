@@ -20,6 +20,7 @@
     "verify:copy": "node scripts/verify-copy.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
     "verify:confirm": "node scripts/probe-confirm.mjs",
+    "verify:batch": "node scripts/probe-batch-report.mjs",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix"
   },
