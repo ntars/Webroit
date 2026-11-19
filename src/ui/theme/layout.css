@@ -293,6 +293,77 @@
   padding: var(--space-2) var(--space-4);
 }
 
+/*
+ * 传输进度条。
+ *
+ * 与终端面板同处一列，`flex-shrink: 0` 保证轨道永远完整可见 ——
+ * 让它参与 flex 压缩会在输出很长时把进度条压成一条线，那正是
+ * 用户最需要看进度的时刻。
+ *
+ * 三段布局用 grid 而非 flex：文件名、轨道、数值三者的宽度关系需要
+ * 「中间吃掉剩余、两侧不换行」的明确约束。文件名用 `min-width: 0`
+ * 配合 ellipsis，否则长文件名会把数值挤出面板。
+ */
+.progress-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* 有总长度时才用三列，未知总量只留「名称 + 已传字节」两列 */
+.progress-strip[data-known='true'] {
+  grid-template-columns: minmax(0, 168px) minmax(0, 1fr) auto;
+}
+
+.progress-strip__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.progress-strip__track {
+  position: relative;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-active);
+  overflow: hidden;
+}
+
+.progress-strip__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  /* 只过渡宽度：颜色与位置都不变，多写属性会让 8 次/秒的更新变卡 */
+  transition: width var(--duration-fast) linear;
+}
+
+.progress-strip__value {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+/* 窄屏：文件名与数值各占一行，轨道独占整行，避免三者挤在一起 */
+@media (max-width: 860px) {
+  .progress-strip,
+  .progress-strip[data-known='true'] {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .progress-strip__track {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
 /* 命令输出行 */
 .term {
   font-family: var(--font-mono);

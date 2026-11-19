@@ -35,6 +35,7 @@ import { EmergencyReset } from '@/ui/views/EmergencyReset';
 import { BrandBadge } from '@/ui/components/BrandBadge';
 import { ToastHost } from '@/ui/components/ToastHost';
 import { SettingsSheet } from '@/ui/components/SettingsSheet';
+import { ProgressStrip } from '@/ui/components/ProgressStrip';
 
 /** 应急入口的 hash 标记 */
 const EMERGENCY_HASH = '#/reset-display';
@@ -388,6 +389,12 @@ export const App: FunctionComponent = () => {
               showCommandEcho={prefs.showCommandEcho}
             />
           </div>
+          {/*
+            传输进度：贴在终端面板底部而不是顶部 ——
+            顶部是「命令输出」标题行，进度插在那里会把标题挤走；
+            底部紧邻最后一行输出，正好是用户此刻的视线位置。
+          */}
+          <ProgressStrip />
         </section>
       </main>
 

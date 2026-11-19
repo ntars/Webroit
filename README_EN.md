@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 79 source files, 17,166 lines (CSS and tests included) |
-| Artifact size | 479 KB across 12 files; first paint roughly 61 KB gzipped |
+| Code size | 82 source files, 17,664 lines (CSS and tests included) |
+| Artifact size | 482 KB across 12 files; first paint roughly 62 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -293,7 +293,7 @@ That single schema now serves **four** consumers, all derived from `BUILTIN_TOOL
 
 **Value**: a 500 MB APK or a 1 GB file turns any base64 staging or temporary disk write into a bottleneck and a failure point.
 
-**Implementation**: pushes use the `sync` protocol, feeding `File.stream()` through a `TransformStream` that counts bytes on the way into `sync.write()` without ever reading the whole file into memory; pulls read a `ReadableStream` and accumulate progress per chunk. Both directions accept an `AbortSignal`, and aborting actively calls `dispose()` on the sync session — failing to dispose blocks every subsequent file operation.
+**Implementation**: pushes use the `sync` protocol, feeding `File.stream()` through a `TransformStream` that counts bytes on the way into `sync.write()` without ever reading the whole file into memory; pulls read a `ReadableStream` and accumulate progress per chunk. Both directions accept an `AbortSignal`, and aborting actively calls `dispose()` on the sync session — failing to dispose blocks every subsequent file operation. Per-chunk progress never goes into the terminal; it passes through `src/ui/state/progress.ts`, is throttled, and lands in a progress bar at the foot of the terminal panel — intermediate states under 120 ms apart that do not cross a whole percentage point are dropped, so 1600 callbacks for a 100 MB package render just over a hundred times.
 
 **Differentiation**: common implementations pass base64 strings for convenience, inflating size by 33%, truncating large files, and spiking memory.
 
@@ -662,7 +662,7 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 7 files, 155 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 8 files, 170 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`, `/ui/state/progress`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 `src/tools/builtin.test.ts` is a registry snapshot test: now that tool definitions are split across seven files under `src/tools/defs/`, assembly order is decided in one place, `builtin.ts`. Dropping a spread (forgetting `...vendorToolsAll`, say) still type-checks, yet the entire vendor section vanishes. The test pins the numbers 34 / 26 / 24, the per-section distribution, id uniqueness, and the vendor pairing.
 
@@ -683,7 +683,7 @@ npm run verify:copy     # do all four failure modes give a cause and a next step
 
 `verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × six states (collapsed, expanded, connection-steps modal, preferences modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
 
-`verify:copy` guards one rule: every failure message must be useful. One part of it executes `src/core/error-copy.ts` for real and asserts, over 17 authentic strings across four modes (not connected / empty result / command failed / device disconnected), that a cause is present, the next step is an action, no filler phrase like "operation failed" or "unknown error" appears, and the raw device text is retained. The other half scans the source for two ways of bypassing the translation layer: dumping an exception straight into `<p>{error}</p>`, and hand-writing `instanceof Error ? x.message : String(x)` in a dozen places. The latter is harmless on its own, but scattered everywhere it means nobody owns the "turn this into a next step" part. A third part guards whether the messages can reach the screen at all: it counts every `toast(` call site, then confirms that a component subscribes to the `toasts` signal, that `App.tsx` actually renders it, and that the emergency-reset early-`return` branch carries it too — a message with no renderer is a message that was never written. No browser needed; it runs in CI.
+`verify:copy` guards one rule: every failure message must be useful. One part of it executes `src/core/error-copy.ts` for real and asserts, over 17 authentic strings across four modes (not connected / empty result / command failed / device disconnected), that a cause is present, the next step is an action, no filler phrase like "operation failed" or "unknown error" appears, and the raw device text is retained. The other half scans the source for two ways of bypassing the translation layer: dumping an exception straight into `<p>{error}</p>`, and hand-writing `instanceof Error ? x.message : String(x)` in a dozen places. The latter is harmless on its own, but scattered everywhere it means nobody owns the "turn this into a next step" part. A third part guards whether the messages can reach the screen at all: it counts every `toast(` call site, then confirms that a component subscribes to the `toasts` signal, that `App.tsx` actually renders it, and that the emergency-reset early-`return` branch carries it too — a message with no renderer is a message that was never written. A fourth part mirrors the third for transfer progress: it counts real `reportProgress(` and `progressSink` call sites, confirms a component subscribes via `useSignal(progress)` and is rendered by `App.tsx`, and additionally asserts that per-chunk progress never goes back into terminal text — transfers call back once per 64 KB block, roughly 1600 times for a 100 MB package, and the 80 ms merge window in `pushOutput` would fold them all into a single DOM text node tens of thousands of pixels wide. No browser needed; it runs in CI.
 
 ### 7.3b CLI and MCP Server
 
@@ -1026,8 +1026,8 @@ Webroit/
 │   │       └── handle.ts           # Method dispatch and the tools/call implementation
 │   └── ui/
 │       ├── App.tsx                 # Shell: sidebar + main area + terminal; emergency route dispatch
-│       ├── state/                  # Signals and global actions
-│       ├── components/             # ToolCard, Terminal, PwaPrompt, and others
+│       ├── state/                  # Signals, global actions, progress throttling
+│       ├── components/             # ToolCard, Terminal, PwaPrompt, ProgressStrip, and others
 │       ├── views/                  # Section pages
 │       └── theme/                  # Design tokens and four stylesheets
 ├── NOTICE                          # Third-party component disclosure
@@ -1052,13 +1052,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 152.1 KB | 52.4 KB | Required for first paint: Preact, tool registry, all services and views |
-| `index-*.css` | 40.1 KB | 7.2 KB | Five stylesheets merged |
+| `index-*.js` | 153.9 KB | 53.0 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.css` | 41.4 KB | 7.4 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
-| Icons total | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 194 KB** | **about 61 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **479 KB** | **—** | 12 files in `dist/` |
+| Icons total | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
+| **First paint total** | **about 197 KB** | **about 62 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **482 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1374,7 +1374,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 75 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 78 `.ts` / `.tsx` files, 0 places of `any` (eight are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 

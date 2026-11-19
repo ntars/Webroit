@@ -313,6 +313,119 @@ if (calls === 0) {
   }
 }
 
+/* ─────────────── D. 进度通路：传输进度必须有出口 ─────────────── */
+
+/*
+ * 与 C 段同构，但守的是另一种缺陷：**上报口存在、信号存在、渲染层不存在**。
+ *
+ * 这轮的实况正是如此：`progress` 信号与 `setProgress()` 都写好了，
+ * 注释里也写着「用于安装 / 推送的进度条」，但全仓没有一处订阅它，
+ * 而 `use-connect` 把逐块回调拼成终端文本行 —— 100 MB 的包约 1600 次回调，
+ * 80 ms 的合并窗口把它们全塞进同一个 DOM 文本节点，宽度撑到几万像素。
+ *
+ * 于是「有进度」和「看得到进度」是两件事。这里断言三环：
+ *   1. 有人发（`reportProgress(` / `progressSink` 被真实调用）
+ *   2. 有人收（组件里 `useSignal(progress)`）
+ *   3. 收的人被挂上了（`App.tsx` 渲染了它）
+ *
+ * 第四环单独断言：进度不能再回到终端文本里。这条最容易被「顺手加一行
+ * pushOutput 显示百分比」重新破坏，而那正是本轮要修掉的东西。
+ */
+
+/** 数出真正推进度的调用点 */
+function countProgressCalls() {
+  const perFile = [];
+  let calls = 0;
+  for (const file of walk(join(ROOT, 'src'), [], /\.tsx?$/)) {
+    const rel = file.replace(ROOT + '/', '');
+    // 定义处不算调用；降频层自己是纯函数，不碰信号
+    if (rel === 'src/ui/state/app-state.ts' || rel.startsWith('src/ui/state/progress')) continue;
+    const text = readFileSync(file, 'utf8');
+    let hits = 0;
+    for (const line of text.split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue;
+      if (/\breportProgress\s*\(/.test(line)) hits++;
+      if (/\bprogressSink\b/.test(line) && !/import\b/.test(line)) hits++;
+    }
+    if (hits > 0) {
+      calls += hits;
+      perFile.push(`${rel}(${hits})`);
+    }
+  }
+  return { calls, perFile };
+}
+
+/** 找出订阅了 `progress` 信号的组件 */
+function findProgressConsumer() {
+  for (const file of walk(join(ROOT, 'src/ui/components'))) {
+    const text = readFileSync(file, 'utf8');
+    if (!/from\s+'@\/ui\/state\/app-state'/.test(text)) continue;
+    if (/useSignal\s*\(\s*progress\s*\)/.test(text)) return file;
+  }
+  return null;
+}
+
+const progressCalls = countProgressCalls();
+const progressConsumer = findProgressConsumer();
+
+if (progressCalls.calls === 0) {
+  fail(
+    '进度有上报',
+    '全仓无进度上报调用',
+    'services 层会逐块回调进度，但界面侧没有任何人接它 —— 传输过程对用户不可见',
+  );
+} else if (!progressConsumer) {
+  fail(
+    '进度有出口',
+    `${progressCalls.calls} 处上报但无消费组件`,
+    `没有组件用 useSignal(progress) 订阅进度：${progressCalls.perFile.join('、')}`,
+  );
+} else {
+  const rel = progressConsumer.replace(ROOT + '/', '');
+  const name = rel.split('/').pop().replace(/\.tsx$/, '');
+  const appText = readFileSync(join(ROOT, 'src/ui/App.tsx'), 'utf8');
+
+  if (!appText.includes(`<${name}`)) {
+    fail('进度已挂载', `${rel} 未被 App.tsx 渲染`, `外壳里找不到 <${name} />`);
+  } else {
+    pass('进度有出口', `${progressCalls.calls} 处上报 → ${rel}，已挂载外壳`);
+  }
+}
+
+/*
+ * 反向断言：进度不许再走终端文本。
+ *
+ * 判据是「同一行里既出现进度相关字样、又出现 pushOutput」——
+ * 上一版正是 `pushOutput('info', `${label}：${done} / ${total}`)`。
+ * 注释行与 doc 引用不算（本仓库注释会引用旧写法说明为什么要改）。
+ */
+function findProgressInTerminal() {
+  const hits = [];
+  for (const file of walk(join(ROOT, 'src'), [], /\.tsx?$/)) {
+    const rel = file.replace(ROOT + '/', '');
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue;
+      if (!/pushOutput\s*\(/.test(line)) continue;
+      // 只抓「把 done/total/百分比写进终端」这一种写法
+      if (/\$\{\s*(done|total|percent)\b|done\s*\/\s*total/.test(line)) {
+        hits.push(`${rel}: ${t.slice(0, 80)}`);
+      }
+    }
+  }
+  return hits;
+}
+
+const progressInTerminal = findProgressInTerminal();
+progressInTerminal.length === 0
+  ? pass('进度不进终端文本', '逐块回调已全部走进度条')
+  : fail(
+      '进度不进终端文本',
+      progressInTerminal,
+      '逐块进度拼进终端会被 80 ms 合并窗口塞进同一个 DOM 节点，宽度撑爆面板',
+    );
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

@@ -11,6 +11,7 @@ import { type Preferences, loadPreferences, resetPreferences, savePreferences } 
 import type { ModuleId } from '@/tools/registry';
 import type { OutputChannel } from '@/core/shell';
 import { signal } from '@/ui/state/signal';
+import { ProgressThrottle, type ProgressTick } from '@/ui/state/progress';
 import { applyTheme } from '@/ui/theme/apply';
 
 /** 连接阶段 */
@@ -35,6 +36,8 @@ export interface ProgressState {
   label: string;
   done: number;
   total: number;
+  /** 百分比 0–100；总量未知时为 -1，界面据此改为只显示已传字节数 */
+  percent: number;
 }
 
 /** 一条提示消息 */
@@ -115,9 +118,85 @@ export function dismissToast(id: number): void {
   toasts.set((prev) => prev.filter((entry) => entry.id !== id));
 }
 
-/** 设置进度 */
-export function setProgress(next: ProgressState | null): void {
-  progress.set(next);
+/*
+ * ── 传输进度的上报口 ──
+ *
+ * 底层是「每 64 KB 回调一次」，100 MB 的包约 1600 次。直接推信号会让
+ * 整棵树每秒重渲染上千次，所以中间隔一层降频（见 `state/progress.ts`）。
+ *
+ * 降频器是模块级单例而非组件内的 useRef：进度是全局唯一的
+ * —— 同一时刻只可能有一个文件在传（`sync` 会话本来就不并发）。
+ * 放组件里会让「切分区后进度归零」变成一个新 bug。
+ *
+ * 不额外暴露 `setProgress`：唯一该被调用的入口就是下面两个，
+ * 多一个能直接改信号的出口，就等于允许某处绕过降频把界面刷爆。
+ */
+const progressThrottle = new ProgressThrottle();
+
+/**
+ * 上报一次传输进度。
+ *
+ * 满值时自动转收尾 —— 这个判断放在这里而不是每个调用点：
+ * 「已传 == 总量」只有底层知道，让 `use-connect`、应急页、CLI 各自判断
+ * 必然会漏掉某一处，表现为进度条永远卡在 99%。
+ *
+ * @param label 文件名或操作名，显示在进度条左侧
+ * @param done 已传字节数
+ * @param total 总字节数；拿不到时传 0，界面显示「已传 N」
+ */
+export function reportProgress(label: string, done: number, total: number): void {
+  if (total > 0 && done >= total) {
+    finishProgress(label, done, total);
+    return;
+  }
+  const tick: ProgressTick | null = progressThrottle.accept({ label, done, total });
+  if (!tick) return;
+  progress.set({
+    label: tick.label,
+    done: tick.done,
+    total: tick.total,
+    percent: tick.percent,
+  });
+}
+
+/**
+ * 传输收尾：交终值并留在界面上给用户看一眼，随后自动消失。
+ *
+ * 为什么不是立刻清空：进度条「闪一下就没了」等于什么都没看到 ——
+ * 用户会怀疑文件到底传完没有。留 800 ms 让终点被看见，再由这里清掉。
+ */
+export function finishProgress(label: string, done: number, total: number): void {
+  const tick = progressThrottle.finish({ label, done, total });
+  if (tick) {
+    progress.set({
+      label: tick.label,
+      done: tick.done,
+      total: tick.total,
+      percent: tick.percent,
+    });
+  }
+  progressThrottle.reset();
+  setTimeout(() => {
+    // 期间若已开始下一个文件，就不要把新进度清掉
+    if (progress.value?.label === label) progress.set(null);
+  }, 800);
+}
+
+/** 直接清空进度条，不做收尾动画（切换设备、清空终端时用） */
+export function clearProgress(): void {
+  progressThrottle.reset();
+  progress.set(null);
+}
+
+/**
+ * 直接可用的进度回调，签名与 `shell` 的 `ProgressSink` 一致。
+ *
+ * 收尾判定放在这里而不是每个调用方：`done >= total` 这件事只有底层知道，
+ * 让 `use-connect`、`EmergencyReset`、CLI 各自判断一遍必然会漏。
+ */
+export function progressSink(name: string, done: number, total: number): void {
+  if (total > 0 && done >= total) finishProgress(name, done, total);
+  else reportProgress(name, done, total);
 }
 
 /**
@@ -162,7 +241,7 @@ export function resetConnection(): void {
   services.set(null);
   phase.set('idle');
   phaseMessage.set('');
-  progress.set(null);
+  clearProgress();
 }
 
 /**

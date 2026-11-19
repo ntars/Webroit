@@ -22,6 +22,7 @@ import {
   loseConnection,
   phase,
   phaseMessage,
+  progressSink,
   pushOutput,
   services,
   session,
@@ -75,7 +76,15 @@ export function useConnect(): ConnectResult {
 
       const createdServices = createServices(created, {
         output: (channel, text) => pushOutput(channel, text),
-        progress: (label, done, total) => pushOutput('info', `${label}：${done} / ${total}`),
+        /*
+         * 进度走信号而非终端文本。
+         *
+         * 上一版是 `pushOutput('info', `${label}：${done} / ${total}`)`：
+         * 一块一行、且 80 ms 内的同频道文本会被合并进同一个 DOM 节点，
+         * 于是 1600 条进度拼成一串几万像素宽的字符，终端只能显示末尾几个数字。
+         * 现在改由进度条承载，终端只留命令与结果。
+         */
+        progress: progressSink,
       });
       services.set(createdServices);
 
