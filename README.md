@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 62 个源文件、16,113 行（含 CSS 与测试） |
-| 产物规模 | 462 KB / 12 个文件，首屏 gzip 约 56 KB |
+| 代码规模 | 76 个源文件、16,446 行（含 CSS 与测试） |
+| 产物规模 | 471 KB / 12 个文件，首屏 gzip 约 59 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -282,7 +282,7 @@ Webroit：    打开网页 → 点连接 → 点功能
 |---|---|---|
 | 网页表单 | 按 `type` 渲染 `ParamField` | `src/ui/components/ToolCard.tsx` |
 | 命令行 | `run <tool-id> --key=value`，按 schema 转换类型与校验范围 | `src/node/runtime.ts` 的 `coerceParams()` |
-| MCP Server | 转成 JSON Schema 供 agent 读取 | `src/node/mcp.ts` 的 `toInputSchema()` |
+| MCP Server | 转成 JSON Schema 供 agent 读取 | `src/node/mcp/schema.ts` 的 `toInputSchema()` |
 | Skill 文档 | 生成 `references/tools.md` 的参数表 | `scripts/gen-skill-docs.mjs` |
 
 **差异化**：同类项目的脚本功能往往是「另写一套命令解释器」（如 BAT 语法子集），两套逻辑必然漂移。本项目只有一个真源 —— 所以「网页里能做的，命令行与 agent 也能做，参数含义完全一致」这句话是可以验证的，不是承诺。
@@ -666,7 +666,9 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 6 个文件、140 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 7 个文件、155 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`）。测试与被测文件同目录，改代码时测试就在旁边。
+
+其中 `src/tools/builtin.test.ts` 是注册表快照测试：工具定义按分区拆到 `src/tools/defs/` 下七个文件后，拼装顺序只由 `builtin.ts` 一处决定，漏掉一行展开符号（比如忘了 `...vendorToolsAll`）typecheck 照样通过，但品牌专区分区会整块消失。该测试锁住 34 / 26 / 24 三个数字、分区分布、id 唯一性与品牌配对。
 
 ### 7.3a 一致性校验
 
@@ -945,7 +947,7 @@ interface DeviceCapabilities {
 ### 10.6 新增一个工具的最小改动面
 
 1. 在 `src/services/` 里加一个方法（若已有服务能覆盖则跳过）。
-2. 在 `src/tools/builtin.ts` 的 `BUILTIN_TOOLS` 数组里加一个 `Tool` 对象。
+2. 在 `src/tools/defs/` 里对应分区文件的数组里加一个 `Tool` 对象（新分区则新建文件，并在 `builtin.ts` 的 `BUILTIN_TOOLS` 里展开）。
 3. 若属于新分区，在 `registry.ts` 的 `MODULES` 里加一条并补 `ModuleId`。
 
 `ModuleView`、`ToolCard`、侧边栏、终端输出、审计记录**均不需要改动**。v0.1 的 26 个工具全部由这同一套机制驱动。
@@ -1002,7 +1004,28 @@ Webroit/
 │   │   └── rollback.service.ts     # 按逆序回放快照
 │   ├── tools/
 │   │   ├── registry.ts             # Tool 类型、注册表、按能力过滤
-│   │   └── builtin.ts              # 26 个内置工具的定义与实现绑定
+│   │   ├── builtin.ts              # 聚合入口：七个分区按顺序拼成 BUILTIN_TOOLS
+│   │   ├── host.ts                 # 宿主注入：服务解析器与产物交付口
+│   │   ├── input.ts                # 入参收敛：str / num / bool / packageList
+│   │   └── defs/                   # 各分区工具定义，一个分区一个文件
+│   │       ├── device.ts           # 设备总览（重启）
+│   │       ├── apps.ts             # 应用管理（6 项）
+│   │       ├── display.ts          # 显示与输入（4 项）
+│   │       ├── files.ts            # 文件传输（4 项）
+│   │       ├── system.ts           # 系统调校（7 项）
+│   │       ├── battery.ts          # 电池管理（2 项）
+│   │       └── vendor.ts           # 品牌专区（5 品牌 × 2 项，模板生成）
+│   ├── node/                       # 命令行与 MCP Server，走本机 adb 而非 WebUSB
+│   │   ├── cli.ts                  # webroit 命令入口，参数解析与人类可读输出
+│   │   ├── runtime.ts              # 工具执行运行时：参数收敛、风险门控、产物落盘
+│   │   ├── adb-driver.ts           # 本机 adb 的 Driver 实现
+│   │   ├── errors.ts               # 用法错误类型
+│   │   ├── mcp.ts                  # MCP Server 启动与退出（stdio JSON-RPC）
+│   │   └── mcp/                    # MCP 的四个职能层
+│   │       ├── protocol.ts         # 协议常量、消息收发、结果包装
+│   │       ├── schema.ts           # 工具名映射与 JSON Schema 生成
+│   │       ├── session.ts          # 设备会话缓存：懒连接 + 失败重连
+│   │       └── handle.ts           # 方法分发与 tools/call 实现
 │   └── ui/
 │       ├── App.tsx                 # 外壳：侧边栏 + 主区域 + 终端；应急路由分流
 │       ├── state/                  # signal 与全局动作
@@ -1031,13 +1054,13 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 147.2 KB | 50.9 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
-| `index-*.css` | 35.8 KB | 6.6 KB | 五份样式表合并后 |
+| `index-*.js` | 147.1 KB | 51.0 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.css` | 36.7 KB | 6.8 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
 | 图标合计 | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **首屏合计** | **约 179 KB** | **约 56 KB** | JS + CSS + HTML，不含图标 |
-| **全量产物** | **462 KB** | **—** | `dist/` 12 个文件 |
+| **首屏合计** | **约 186 KB** | **约 59 KB** | JS + CSS + HTML，不含图标 |
+| **全量产物** | **471 KB** | **—** | `dist/` 12 个文件 |
 
 构建耗时 0.8 秒，模块数 180。类型检查 `tsc --noEmit` 零错误。
 
@@ -1285,7 +1308,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 140 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 155 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1352,7 +1375,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 58 个 `.ts` / `.tsx` 文件、0 处 `any`（含 6 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 72 个 `.ts` / `.tsx` 文件、0 处 `any`（含 7 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

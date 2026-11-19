@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 62 source files, 16,113 lines (CSS and tests included) |
-| Artifact size | 462 KB across 12 files; first paint roughly 56 KB gzipped |
+| Code size | 76 source files, 16,446 lines (CSS and tests included) |
+| Artifact size | 471 KB across 12 files; first paint roughly 59 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -280,7 +280,7 @@ That single schema now serves **four** consumers, all derived from `BUILTIN_TOOL
 |---|---|---|
 | Web form | renders `ParamField` by `type` | `src/ui/components/ToolCard.tsx` |
 | CLI | `run <tool-id> --key=value`, with type coercion and range checks | `coerceParams()` in `src/node/runtime.ts` |
-| MCP Server | converts to JSON Schema for agents | `toInputSchema()` in `src/node/mcp.ts` |
+| MCP Server | converts to JSON Schema for agents | `toInputSchema()` in `src/node/mcp/schema.ts` |
 | Skill docs | generates the parameter tables in `references/tools.md` | `scripts/gen-skill-docs.mjs` |
 
 **Differentiation**: comparable projects implement scripting as "a second command interpreter" (a subset of BAT syntax, for instance), and two implementations inevitably diverge. This project has one source of truth — so "what works in the browser also works from the CLI and from an agent, with identical parameter meaning" is verifiable, not just claimed.
@@ -662,7 +662,9 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 6 files, 140 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 7 files, 155 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`). Tests sit next to the files they cover, so they are right there when the code changes.
+
+`src/tools/builtin.test.ts` is a registry snapshot test: now that tool definitions are split across seven files under `src/tools/defs/`, assembly order is decided in one place, `builtin.ts`. Dropping a spread (forgetting `...vendorToolsAll`, say) still type-checks, yet the entire vendor section vanishes. The test pins the numbers 34 / 26 / 24, the per-section distribution, id uniqueness, and the vendor pairing.
 
 ### 7.3a Consistency Checks
 
@@ -941,7 +943,7 @@ The practical purpose of layering is to make device operations testable: `servic
 ### 10.6 Minimal Change Surface for a New Tool
 
 1. Add a method in `src/services/` (skip if an existing service covers it).
-2. Add a `Tool` object to the `BUILTIN_TOOLS` array in `src/tools/builtin.ts`.
+2. Add a `Tool` object to the array in the matching file under `src/tools/defs/` (for a new section, create a file and spread it into `BUILTIN_TOOLS` in `builtin.ts`).
 3. If it belongs to a new section, add an entry to `MODULES` in `registry.ts` and extend `ModuleId`.
 
 `ModuleView`, `ToolCard`, the sidebar, terminal output, and the audit record **all require no changes**. All 26 tools in v0.1 are driven by this one mechanism.
@@ -998,7 +1000,28 @@ Webroit/
 │   │   └── rollback.service.ts     # Replays snapshots in reverse
 │   ├── tools/
 │   │   ├── registry.ts             # Tool types, registry, filtering by capability
-│   │   └── builtin.ts              # Definitions and implementation bindings for the 26 built-in tools
+│   │   ├── builtin.ts              # Aggregation entry: seven sections assembled into BUILTIN_TOOLS
+│   │   ├── host.ts                 # Host injection: service resolver and artifact sink
+│   │   ├── input.ts                # Input coercion: str / num / bool / packageList
+│   │   └── defs/                   # Per-section tool definitions, one file each
+│   │       ├── device.ts           # Device overview (reboot)
+│   │       ├── apps.ts             # App management (6 tools)
+│   │       ├── display.ts          # Display and input (4 tools)
+│   │       ├── files.ts            # File transfer (4 tools)
+│   │       ├── system.ts           # System tuning (7 tools)
+│   │       ├── battery.ts          # Battery management (2 tools)
+│   │       └── vendor.ts           # Vendor zone (5 vendors × 2, template-generated)
+│   ├── node/                       # CLI and MCP server, using local adb rather than WebUSB
+│   │   ├── cli.ts                  # `webroit` command entry: argument parsing, human-readable output
+│   │   ├── runtime.ts              # Tool runtime: parameter coercion, risk gating, artifact saving
+│   │   ├── adb-driver.ts           # Driver implementation over local adb
+│   │   ├── errors.ts               # Usage error type
+│   │   ├── mcp.ts                  # MCP server startup and shutdown (stdio JSON-RPC)
+│   │   └── mcp/                    # Four role-specific MCP layers
+│   │       ├── protocol.ts         # Protocol constants, message I/O, result wrapping
+│   │       ├── schema.ts           # Tool-name mapping and JSON Schema generation
+│   │       ├── session.ts          # Device session cache: lazy connect, reconnect on failure
+│   │       └── handle.ts           # Method dispatch and the tools/call implementation
 │   └── ui/
 │       ├── App.tsx                 # Shell: sidebar + main area + terminal; emergency route dispatch
 │       ├── state/                  # Signals and global actions
@@ -1027,13 +1050,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 147.2 KB | 50.9 KB | Required for first paint: Preact, tool registry, all services and views |
-| `index-*.css` | 35.8 KB | 6.6 KB | Five stylesheets merged |
+| `index-*.js` | 147.1 KB | 51.0 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.css` | 36.7 KB | 6.8 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
 | Icons total | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 179 KB** | **about 56 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **462 KB** | **—** | 12 files in `dist/` |
+| **First paint total** | **about 186 KB** | **about 59 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **471 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1349,7 +1372,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 58 `.ts` / `.tsx` files, 0 places of `any` (six are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 72 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 
