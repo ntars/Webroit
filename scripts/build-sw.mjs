@@ -31,27 +31,24 @@ async function walk(dir, acc = []) {
 }
 
 /**
- * 需要预缓存的文件。
+ * 需要预缓存的文件：dist 里的全部文件，除 sw.js 自身。
  *
- * 只放「界面骨架」：HTML、清单、图标、入口脚本与样式。
- * 不预缓存整包 —— 全量预缓存会让首次安装下载十几 MB，
- * 而用户可能只是来看一眼。ADB 传输层那个大分包留给运行时按需缓存。
+ * 为什么全量预缓存，而不是只缓存「首屏骨架」：
+ *
+ * 1. **体积不构成理由**。全部产物约 480 KB，其中图标占 200 KB，
+ *    脚本与样式约 260 KB。只缓存骨架也只省下 73 KB 的 ADB 分包，
+ *    换来的却是「离线时点连接设备直接失败」。
+ * 2. **使用场景决定策略**。这个工具最需要离线能力的场合恰恰是
+ *    机房、产线、飞机上 —— 那种地方没有网络，而设备就在手上。
+ *    把「按需加载」当成省流量的手段，等于在最需要它的时候让它缺席。
+ * 3. **更新成本不变**。版本号取产物指纹，任何一个文件变了版本号就变，
+ *    旧缓存整体丢弃，不会出现新旧文件混用。
+ *
+ * sw.js 自身不预缓存：它是缓存策略的执行者，不是被缓存的对象，
+ * 且它的 URL 必须能被浏览器直接更新到最新版本。
  */
 function pickPrecache(files) {
-  const assets = files.filter((file) => file.startsWith('assets/'));
-  const shell = files.filter(
-    (file) =>
-      file === 'index.html' ||
-      file === 'manifest.webmanifest' ||
-      file === 'favicon.svg' ||
-      file.startsWith('icons/'),
-  );
-
-  // 入口 JS 与 CSS 必须预缓存，否则离线时打开是一片空白。
-  // 其余分包体积大，留给运行时缓存。
-  const entry = assets.filter((file) => /\.(css)$/.test(file) || /^assets\/index-[^/]+\.js$/.test(file));
-
-  return [...shell, ...entry].sort();
+  return files.filter((file) => file !== 'sw.js').sort();
 }
 
 /** 用产物清单算出版本指纹 */

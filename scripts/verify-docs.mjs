@@ -13,7 +13,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
@@ -384,6 +384,61 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
       fail('README 对比度表格数值', '与实测一致', mismatched.length, mismatched.join('；'));
     } else {
       pass('README 对比度表格', `${checked} 行与实测一致`);
+    }
+  }
+}
+
+// 5c. Service Worker 预缓存清单：必须是 dist 的全部文件（sw.js 自身除外）
+{
+  const dist = join(ROOT, 'dist');
+  const swPath = join(dist, 'sw.js');
+  if (!existsSync(swPath)) {
+    fail('dist/sw.js 存在', '已注入版本与预缓存', '缺失', 'CI 里须在 build 之后运行');
+  } else {
+    const sw = readFileSync(swPath, 'utf8');
+    const m = sw.match(/const PRECACHE = \[([\s\S]*?)\];/);
+    if (!m) fail('sw.js 预缓存清单', '可解析', '未找到 PRECACHE 数组');
+    else {
+      const listed = [...m[1].matchAll(/'\.\/([^']+)'/g)].map((x) => x[1]).sort();
+
+      // dist 里的全部文件，排除 sw.js 自身（它是策略执行者，不被缓存）
+      const all = [];
+      const walkDist = (d) => {
+        for (const name of readdirSync(d, { withFileTypes: true })) {
+          const full = join(d, name.name);
+          if (name.isDirectory()) walkDist(full);
+          else all.push(full.slice(dist.length + 1).split(sep).join('/'));
+        }
+      };
+      walkDist(dist);
+      const expected = all.filter((f) => f !== 'sw.js').sort();
+
+      const missing = expected.filter((f) => !listed.includes(f));
+      const extra = listed.filter((f) => !expected.includes(f));
+
+      if (missing.length === 0 && extra.length === 0) {
+        pass('预缓存覆盖全部产物', `${listed.length} 个文件（dist ${all.length} 个，排除 sw.js）`);
+      } else {
+        fail(
+          '预缓存清单与 dist 一致',
+          `缺 ${missing.length} / 多 ${extra.length}`,
+          '完全一致',
+          [...missing.map((f) => `缺 ${f}`), ...extra.map((f) => `多 ${f}`)].join('、'),
+        );
+      }
+
+      // README 里出现的预缓存文件数必须等于实际条数
+      const zhCounts = [...readme.matchAll(/预缓存 (\d+) 个(?:界面)?文件/g)].map((x) => Number(x[1]));
+      const enCounts = [...readmeEn.matchAll(/[Pp]recaches (\d+) (?:interface )?files|[Pp]recache \| (\d+) files/g)]
+        .map((x) => Number(x[1] ?? x[2]));
+      const declaredCounts = [...zhCounts, ...enCounts];
+      if (declaredCounts.length === 0) {
+        fail('README 预缓存条数条目', listed.length, null, '未找到「预缓存 N 个文件」');
+      } else if (declaredCounts.every((n) => n === listed.length)) {
+        pass('README 预缓存条数', `${listed.length}（中文 ${zhCounts.length} 处 + 英文 ${enCounts.length} 处，均一致）`);
+      } else {
+        fail('README 预缓存条数', listed.length, declaredCounts.join(' / '));
+      }
     }
   }
 }

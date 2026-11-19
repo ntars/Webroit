@@ -97,6 +97,14 @@ jobs:
         # 「原因 + 下一步」，以及有没有界面绕过翻译层直出裸异常。
         run: npm run verify:copy
 
+      - name: 校验离线能力
+        # 真实断网：装 Service Worker → 优雅关浏览器 → 关服务器 → 重启浏览器打开。
+        # 校验三件事：预缓存覆盖全部产物、两个缓存桶按路径分对、
+        # 断网重开后界面与在线一致（含按需加载的 ADB 分包）。
+        # 必须真关服务器 —— CDP 的离线模拟不覆盖 Service Worker 自己的 fetch，
+        # 用它测会得到假通过的绿灯。
+        run: npm run verify:offline
+
       - name: 配置 Pages
         uses: actions/configure-pages@v5
 

@@ -220,7 +220,7 @@ The following are explicitly split into two groups: those shipped in v0.1 and th
 
 **Risk grading with confirmation.** Every feature is labelled as one of four levels: read-only / reversible / needs confirmation / high risk. The interface changes shape accordingly: read-only executes immediately, reversible offers a restore path, needs-confirmation raises a dialog, and high risk requires typing the word "confirm" before proceeding. The level-3 gate is unaffected by preference toggles — uninstall, clear data, and entering EDL have no undo path, and that gate must not be switchable by the user. Mutating operations are also written to the local audit record, filterable by status and exportable as JSON.
 
-**PWA offline capability.** The Service Worker precaches 10 interface files, so reopening the page after losing network still renders completely; the app installs as a desktop application and launches from a desktop icon. Updates do not take over automatically — when a new version appears, a bar at the top lets the user decide when to refresh. This shipped in v0.1; see 4.7 and 5.14 for details.
+**PWA offline capability.** The Service Worker precaches 11 files (every build artifact except the Service Worker itself), so reopening the page after losing network still renders completely, including the lazily loaded ADB transport layer; the app installs as a desktop application and launches from a desktop icon. Updates do not take over automatically — when a new version appears, a bar at the top lets the user decide when to refresh. This shipped in v0.1; see 4.7 and 5.14 for details.
 
 **Still planned:**
 
@@ -323,7 +323,7 @@ When a new version is found it **does not take over automatically**: after preca
 
 **Differentiation**: the common approach uses `skipWaiting()` plus `clientsClaim()` to swap versions automatically, and the user discovers mid-operation that the interface changed and state was lost. The trade-off here is "update a little later rather than swap resources in the middle of an operation".
 
-**Evidence**: after killing the local server and reloading, the interface still renders completely (all 8 navigation entries and the connect panel present). The precache list holds 10 files: entry JS, CSS, HTML, manifest, and 5 icons. The 73 KB ADB transport chunk is **not** precached, because it is not needed for first paint and precaching it would triple the download size of the first install.
+**Evidence**: `npm run verify:offline` performs a genuine offline check — install the Service Worker, close the browser gracefully, stop the local server, then restart the browser with the same profile and open the same address. It asserts three things: the precache covers every artifact in `dist/`, both cache buckets are split by path correctly, and after going offline the navigation item count matches the online run while the lazily loaded ADB chunk is still available. The precache list holds 11 files: entry JS, CSS, HTML, manifest, 5 icons, and the ADB transport chunk. **The ADB chunk is precached too** — its entire use case is "the device is in your hand but there is no network", and saving 73 KB by making "Connect device" fail offline trades the capability you need most for bandwidth you do not.
 
 ### 4.8 Same Capabilities, Three Ways In
 
@@ -1045,7 +1045,7 @@ Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports ze
 | Audit record reads | Only the current session prefix | Snapshot and audit rows are filtered by `sessionId`; history does not participate in sorting |
 | Snapshot restore ordering | 50 same-millisecond records strictly reversed | The sort key is the monotonic `seq`, never a timestamp |
 | Terminal output merging | Consecutive same-channel text merged | Prevents line-by-line rendering from stuttering on long commands |
-| Service Worker precache | 10 files | Shell and entry script only; the ADB chunk stays in runtime cache |
+| Service Worker precache | 11 files | Every build artifact precached (`sw.js` excepted), ADB chunk included |
 
 ### 12.3 Not Yet Measured
 
@@ -1182,7 +1182,7 @@ Vendor hint text (such as Xiaomi requiring "USB debugging (Security settings)") 
 | Item | Status | Notes |
 |---|---|---|
 | Service Worker | Supported | Registers on Chromium-based browsers and Safari 16.4+ |
-| Offline interface | Supported | 10 files precached (HTML, manifest, icons, entry JS and CSS) |
+| Offline interface | Supported | 11 files precached (HTML, manifest, 5 icons, entry JS and CSS, ADB chunk) |
 | Offline device operation | No network needed | Device communication runs over USB and never touched the network |
 | Install as desktop app | Supported | Chrome and Edge show an install button; Safari uses "Add to Home Screen" |
 | Update prompt | Supported | A bar appears at the top when a new version is found; the user decides when to refresh |

@@ -18,6 +18,7 @@
     "verify:theme": "node scripts/verify-theme.mjs",
     "verify:layout": "node scripts/verify-layout.mjs",
     "verify:copy": "node scripts/verify-copy.mjs",
+    "verify:offline": "node scripts/verify-offline.mjs",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix"
   },
