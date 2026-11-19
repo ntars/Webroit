@@ -695,14 +695,23 @@ textarea.input {
  *
  * 宽度收到 420px：这里只有一句话、可能一个输入框和两个按钮，
  * 拉宽会让「取消」与「确认」隔开半屏，反而增加误点。
+ *
+ * 居中方式必须写成「容器可滚 + 卡片 margin:auto」，不能用 align-items /
+ * justify-content 居中 —— 后者在卡片比视口高时会把溢出量往两头等分，
+ * 向上溢出的那半截（标题、目标清单开头）永远滚不到，等于被永久裁掉。
+ * 实测：667×320 与 568×320 的手机横屏下卡片 341px 高，顶部跑到 -10px；
+ * 375×300 的分屏小窗下 -30px，连「取消」按钮都被顶出屏幕。
+ * `margin:auto` 的行为正好相反：空间够时自动居中，空间不够时归零、
+ * 让卡片从 padding 边缘开始，配合 overflow-y:auto 就能整张滚到。
  */
 .confirm-overlay {
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-modal) + 1);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow-y: auto;
+  /* 滚动到此为止，别把背后的页面一起带着滚 */
+  overscroll-behavior: contain;
   padding: var(--space-5);
   background: var(--scrim);
 }
@@ -711,13 +720,39 @@ textarea.input {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  /* 上下留白由 margin:auto 吸收；空间不足时归零，卡片从顶部开始 */
+  margin: auto;
   width: 100%;
   max-width: 420px;
+  /*
+   * 矮视口下卡片自身也不许超过可用高度：超出的部分交给正文去滚。
+   *
+   * 用 `100dvh` 优先、`100vh` 兜底：移动端地址栏收起 / 展开时
+   * `100vh` 比真实可视高度大，按它算高度会让动作区落到屏幕外。
+   * 减去上下 padding（各 --space-5）才是真正可用的那一块。
+   */
+  max-height: calc(100vh - var(--space-5) * 2);
+  max-height: calc(100dvh - var(--space-5) * 2);
   padding: var(--space-4);
   border-radius: var(--radius-lg);
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-lg);
+}
+
+/*
+ * 正文区：唯一可伸缩的一块。
+ *
+ * `min-height: 0` 不能省 —— flex 子项默认 `min-height: auto`，
+ * 内容多时它会拒绝收缩，把下面的动作区顶出卡片。
+ */
+.confirm-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .confirm-sheet__title {
@@ -735,10 +770,15 @@ textarea.input {
 /*
  * 目标清单用次级小字并限制高度：批量卸载可能勾了三十个包名，
  * 全铺开会把「确认」按钮顶出视口 —— 那会让用户以为按钮坏了。
+ *
+ * 高度改用「视口比例 + 上限」：矮视口下 96px 的固定值会和正文其它部分
+ * 抢空间，把整张卡片推过视口。22vh 在 320px 高的横屏里只占 70px，
+ * 240px 的上限保证大屏不会铺得太长。
  */
 .confirm-sheet__detail {
-  max-height: 96px;
+  max-height: min(240px, 22vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   background: var(--bg-sunken);
@@ -749,9 +789,15 @@ textarea.input {
   word-break: break-all;
 }
 
-/* 取消在左、确认在右：与系统对话框的既有习惯一致，右手拇指先碰到取消 */
+/*
+ * 取消在左、确认在右：与系统对话框的既有习惯一致，右手拇指先碰到取消。
+ *
+ * `flex: none` 让动作区在正文被压缩时保持原高不下陷 —— 这一条是
+ * 「必须先滚动才能拒绝」的根治点，缺了它正文的收缩会连带动按钮一起挤变形。
+ */
 .confirm-sheet__actions {
   display: flex;
+  flex: none;
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-1);

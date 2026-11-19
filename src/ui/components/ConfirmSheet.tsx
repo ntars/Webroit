@@ -58,9 +58,19 @@ export const ConfirmSheet: FunctionComponent = () => {
       }}
     >
       <div class="confirm-sheet">
-        <h2 class="confirm-sheet__title">{request.title}</h2>
-        <p class="confirm-sheet__reason">{request.reason}</p>
-        {request.detail && <p class="confirm-sheet__detail">{request.detail}</p>}
+        {/*
+          * 正文单独一层且可滚动，动作区留在外面。
+          *
+          * 理由：卡片整体可滚（T-020 之前的修法）能救回被裁的标题，
+          * 但「取消 / 卸载」两个键会被推到屏幕外，用户得先滚一下才找得到 ——
+          * 一个必须先滚动才能拒绝的对话框，在误触场景里等于逼人确认。
+          * 所以限高落在正文上，标题与两个按钮永远留在视口内。
+          */}
+        <div class="confirm-sheet__body">
+          <h2 class="confirm-sheet__title">{request.title}</h2>
+          <p class="confirm-sheet__reason">{request.reason}</p>
+          {request.detail && <p class="confirm-sheet__detail">{request.detail}</p>}
+        </div>
 
         {request.word && (
           <div class="field">

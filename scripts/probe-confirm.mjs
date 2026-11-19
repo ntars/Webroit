@@ -317,6 +317,110 @@ check('窄屏无横向溢出', geometry?.overflow === false, `弹层宽 ${geomet
 check('30 个包名的长清单限高可滚动', geometry?.detailScrolls === true, '避免把确认键顶出视口');
 check('按钮全部留在视口内', geometry?.inViewport === true);
 
+/*
+ * ── 9. 视口高度扫描：矮屏下标题与两个按钮都必须在视口内 ──
+ *
+ * 为什么宽度测完还得测高度：`.confirm-sheet` 的 420px 上限管的是横向，
+ * 而这一层真正会失控的是纵向 —— 卡片自身高度由文案、输入框、目标清单堆出来，
+ * 视口一矮（手机横屏、Safari 工具栏占位、分屏小窗）就会顶出屏幕。
+ *
+ * 三种症状按严重度递增，所以断言也分三条：
+ * 1. 卡片超出视口上下边界 —— 内容被裁
+ * 2. 标题不可见 —— 用户不知道自己在确认什么
+ * 3. 按钮点不到 —— 连「取消」都够不着，只能刷新页面逃出去
+ *
+ * 按钮判定用 `elementFromPoint` 而不是 `getBoundingClientRect().top >= 0`：
+ * 元素几何上留在视口内、却被别的图层盖住时，只看矩形会判通过。
+ * 这是 T-020 之前 `verify-layout` 已经踩过的坑，这里沿用同一套判据。
+ */
+const HEIGHT_SWEEP = [
+  { w: 812, h: 375, label: '手机横屏' },
+  { w: 667, h: 320, label: '手机横屏 + 工具栏' },
+  { w: 568, h: 320, label: '小屏横屏' },
+  { w: 375, h: 300, label: '分屏小窗' },
+  // 平板竖屏 / 桌面补进同一轮：420px 上限在这两档是否有意义，此前从未量过
+  { w: 768, h: 1024, label: '平板竖屏' },
+  { w: 1440, h: 900, label: '桌面' },
+];
+
+for (const vp of HEIGHT_SWEEP) {
+  await browser.send(
+    'Emulation.setDeviceMetricsOverride',
+    { width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: vp.w <= 768 },
+    sessionId,
+  );
+  await new Promise((r) => setTimeout(r, 260));
+
+  await evaluate(`
+    window.__h = null;
+    import('/src/ui/state/confirm.ts').then(m => {
+      window.__h = m.askConfirm({
+        title: '批量卸载 30 个应用',
+        reason: '所选应用将从设备上移除，普通应用的数据一并删除且无法撤销。系统应用会保留数据，可用「卸载与恢复」装回。',
+        detail: Array.from({length:30},(_,i)=>'com.example.demoapp'+i).join('、'),
+        confirmLabel: '卸载',
+        word: '确认',
+      });
+    })
+  `);
+  await settle();
+
+  const h = await evaluate(`(() => {
+    const sheet = document.querySelector('.confirm-sheet');
+    if (!sheet) return { missing: true };
+    const title = sheet.querySelector('.confirm-sheet__title');
+    const tr = title.getBoundingClientRect();
+    const th = document.elementFromPoint(tr.left + 4, tr.top + tr.height / 2);
+    const body = sheet.querySelector('.confirm-sheet__body');
+    const btns = [...sheet.querySelectorAll('.confirm-sheet__actions .btn')];
+    const r = sheet.getBoundingClientRect();
+    return {
+      vh: window.innerHeight,
+      vw: window.innerWidth,
+      w: Math.round(r.width),
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      titleInView: tr.top >= 0 && tr.bottom <= window.innerHeight,
+      titleHit: Boolean(th && (th === title || title.contains(th))),
+      btnsHittable: btns.every(b => {
+        const br = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(br.left + br.width / 2, br.top + br.height / 2);
+        return Boolean(hit && (hit === b || b.contains(hit)));
+      }),
+      bodyScrolls: body ? body.scrollHeight > body.clientHeight + 1 : false,
+    };
+  })()`);
+
+  const tag = `${vp.w}×${vp.h} ${vp.label}`;
+  check(
+    `${tag}：卡片不超出视口`,
+    !h.missing && h.top >= -0.5 && h.bottom <= h.vh + 1,
+    h.missing ? '未渲染' : `top ${h.top} / bottom ${h.bottom} / 视口 ${h.vh}`,
+  );
+  check(`${tag}：标题可见且未被遮挡`, h.titleInView === true && h.titleHit === true);
+  check(`${tag}：两个按钮都在视口内且点得到`, h.btnsHittable === true);
+
+  /*
+   * 420px 宽度上限：宽屏下卡片不许跟着视口一起变宽。
+   *
+   * 这条是「连续五轮登记未测」的正解 —— 之前一直在猜「768 / 1440 会不会溢出」，
+   * 实际量下来宽度从来没出过问题，出问题的是高度。但宽度上限仍需一条断言：
+   * 它一旦被误删，宽屏下「取消」与「卸载」会隔着半屏，误点概率直接上升。
+   * 窄屏时卡片本来就窄于上限，所以只在视口宽 ≥ 640px 时判定。
+   */
+  if (vp.w >= 640) {
+    check(
+      `${tag}：卡片宽度不超过 420px`,
+      h.w <= 420,
+      `实测 ${h.w}px / 视口 ${h.vw}px`,
+    );
+  }
+
+  // 收尾：Esc 兑现 false，避免下一条请求被「已有请求在等」挡掉
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await new Promise((r) => setTimeout(r, 160));
+}
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);
 

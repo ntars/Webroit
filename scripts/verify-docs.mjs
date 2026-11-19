@@ -648,6 +648,51 @@ if (readmeEn) {
   h3zh === h3en ? pass('中英文三级标题数', h3zh) : fail('中英文三级标题数', `${h3zh} vs ${h3en}`, '');
 } else fail('README_EN.md', '存在', '缺失');
 
+/*
+ * 7. 校验脚本份数：中英文两处都写死了「八份脚本」这类序数词。
+ *
+ * 这类数字最容易漂 —— 新增一个 verify / probe 脚本时没人会想到去改那句话，
+ * 结果读者看到一个数与 `ls scripts/` 对不上，进而怀疑后面所有数字。
+ * 反过来，脚本被删 / 被并进别的文件时那句话也会说谎。
+ * 所以直接数 `scripts/` 下的 verify-* 与 probe-*，再和两处文案里写的序数对齐。
+ *
+ * 只认 `scripts/` 顶层的 `verify-*.mjs` / `probe-*.mjs`：`lib/` 里的共享模块
+ * 是被它们 import 的，不是独立可跑的校验。
+ */
+const CN_ORDINAL = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const scriptCount = readdirSync(join(ROOT, 'scripts')).filter((n) => /^(verify|probe)-.+\.mjs$/.test(n)).length;
+const scriptWord = CN_ORDINAL[scriptCount] ?? String(scriptCount);
+
+/** 从文档里抓「N 份脚本」/「N scripts」的 N，抓不到就是文档没这句话 */
+const scriptClaim = (text, re) => {
+  const hit = re.exec(text);
+  return hit ? hit[1] : null;
+};
+const zhHit = /(^|\n)([零一二三四五六七八九十]+)份脚本/.exec(readme);
+const zhClaim = zhHit ? zhHit[2] : null;
+const zhClaimNum = zhClaim ? CN_ORDINAL.indexOf(zhClaim) : null;
+const EN_ORDINAL = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+};
+const enHit = readmeEn ? /(^|\n)(\w+) scripts\b/i.exec(readmeEn) : null;
+const enClaimNum = enHit ? (EN_ORDINAL[enHit[2].toLowerCase()] ?? null) : null;
+
+if (zhClaimNum === null) {
+  fail('校验脚本份数（中文）', '文档写明「N 份脚本」', '未找到该表述', 'README.md 7.3a 开头');
+} else if (zhClaimNum !== scriptCount) {
+  fail('校验脚本份数（中文）', `scripts/ 下 ${scriptCount} 份`, `${zhClaim}份`, '改 7.3a 开头那句');
+} else {
+  pass('校验脚本份数（中文）', `${scriptWord}份，与 scripts/ 一致`);
+}
+
+if (enClaimNum === null) {
+  fail('校验脚本份数（英文）', '文档写明「N scripts」', '未找到该表述', 'README_EN.md 7.3a 开头');
+} else if (enClaimNum !== scriptCount) {
+  fail('校验脚本份数（英文）', `scripts/ 下 ${scriptCount} 份`, `${enHit[2]} scripts`, '改 7.3a 开头那句');
+} else {
+  pass('校验脚本份数（英文）', `${enHit[2]}，与 scripts/ 一致`);
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);
