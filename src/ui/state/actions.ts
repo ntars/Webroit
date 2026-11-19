@@ -17,7 +17,8 @@
 
 import type { ShellContext } from '@/core/shell';
 import { audited } from '@/core/audit';
-import { preferences, toast } from '@/ui/state/app-state';
+import { preferences, pushOutput, toast } from '@/ui/state/app-state';
+import { buildBatchReport, type BatchOutcome } from '@/ui/state/batch-report';
 import { askConfirm, CONFIRM_WORD, gateFor, type ConfirmRequest } from '@/ui/state/confirm';
 
 /** 执行变更所需的上下文 */
@@ -84,19 +85,21 @@ export async function runMutation<T>(
 }
 
 /**
- * 批量操作的成功提示。
+ * 批量操作的结果播报。
  *
  * 放在这里而不是每个视图各写一句：批量结果的措辞要能同时说清
  * 「动了几个」与「成了几个」，失败时还得明确「其余已执行」——
  * 少这一句，用户会以为整批回滚了。
+ *
+ * 上一版只收两个计数（`count, ok`），于是失败明细无处可去：
+ * 提示条写「逐条原因见下方记录」，而下方什么记录都没有 ——
+ * `BatchResult.message` 被视图层数完个数就扔了。现在收完整数组，
+ * 摘要与明细各自有出口：摘要进提示条，明细逐条进终端。
  */
-export function reportBatch(count: number, ok: number, actionLabel: string): void {
-  if (ok === count) {
-    toast('success', `${count} 个${actionLabel}完成`);
-    return;
-  }
-  toast(
-    'error',
-    `${count} 个${actionLabel}：成功 ${ok} 个，失败 ${count - ok} 个。失败项未改动，逐条原因见下方记录`,
-  );
+export function reportBatch(results: readonly BatchOutcome[], actionLabel: string): void {
+  const report = buildBatchReport(results, actionLabel);
+  toast(report.tone, report.summary);
+  // 失败明细走 stderr 频道；每条都是独立事件，关掉 80 ms 合并
+  // —— 否则 20 条包名会挤进同一个 DOM 节点，视觉上连成一片读不出来
+  for (const line of report.lines) pushOutput('stderr', line, { merge: false });
 }

@@ -799,6 +799,177 @@ if (!confirmSheetCode) {
   }
 }
 
+/* ─────────────── G. 批量播报必须带得上失败明细 ─────────────── */
+
+/*
+ * F 段守的是「批量操作会不会先问」，G 段守的是「问完之后，结果说不说得清」。
+ *
+ * 实况（本轮实测）：`reportBatch(count, ok, label)` 只收两个计数，
+ * 提示条写的是「5 个冻结：成功 3 个，失败 2 个。失败项未改动，
+ * 逐条原因见下方记录」—— 而**下方没有任何记录**。批量执行在
+ * `app.service.ts` 里逐条 try/catch，失败原因塞进 `BatchResult.message`
+ * 返回，视图层只数了 `success` 的个数就把数组扔了；终端里只有每条命令的
+ * 原始回显，没有「哪几个没成、为什么」。
+ *
+ * 所以这一段断言三环：
+ *   1. 播报层由纯函数产出（`buildBatchReport`），不是拼字符串
+ *   2. 视图层的每个调用点交的是完整结果数组，而不是 `.length`
+ *   3. 反向禁令：全仓不得再出现「见下方记录」这类指不到东西的说法
+ */
+
+const batchReportCode = codeOf('src/ui/state/batch-report.ts');
+
+if (!batchReportCode) {
+  fail('批量播报明细', 'src/ui/state/batch-report.ts', '缺失', '播报仍在视图里拼字符串，失败明细无处安放');
+} else {
+  // 环 1：摘要与明细都从数据得出，且明细的出口是终端
+  const hasBuilder = /export function buildBatchReport\s*\(/.test(batchReportCode);
+  const hasPick = /export function pickFailures\s*\(/.test(batchReportCode);
+  const actionsUses = /buildBatchReport\s*\(/.test(actionsCode ?? '');
+  const pushesLines = /pushOutput\s*\(/.test(actionsCode ?? '');
+
+  if (!hasBuilder || !hasPick) {
+    fail(
+      '批量播报由数据得出',
+      `buildBatchReport ${hasBuilder} / pickFailures ${hasPick}`,
+      '两项都要',
+      '只数成功个数就丢掉结果数组，失败项的名称与原因永远出不来',
+    );
+  } else if (!actionsUses || !pushesLines) {
+    fail(
+      '批量播报接到终端',
+      `actions 调 buildBatchReport ${actionsUses} / 明细进终端 ${pushesLines}`,
+      '两项都要',
+      '摘要进了提示条但明细没出口，等于把「见下方记录」换了个说法',
+    );
+  } else {
+    pass('批量播报由数据得出', 'buildBatchReport + pickFailures，摘要进提示条、明细进终端');
+  }
+
+  /*
+   * 环 1b：摘要必须点名一个界面上真实存在的区域。
+   *
+   * 不必猜措辞，但必须出现「命令输出」—— 那是终端面板的标题，
+   * 写在提示条里用户抬头就能找到。
+   */
+  /命令输出/.test(batchReportCode)
+    ? pass('失败指引可落地', '摘要指向「命令输出」面板')
+    : fail('失败指引可落地', '摘要未指向任何界面区域', '缺少可定位的区域名', '用户会被指去一个不存在的地方');
+}
+
+/*
+ * 环 2：视图层每个调用点都必须交完整数组。
+ *
+ * 判据是「实参里不得出现 `.length`」—— 这是「只交个数」的最直接特征。
+ * 用括号配平取实参而不是正则截断：`reportBatch(outcome.value.map(...), '冻结')`
+ * 里 map 的回调本身就带括号，贪婪/非贪婪都会截错位置。
+ */
+function callArgs(text, callee) {
+  const found = [];
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(`${callee}(`, from);
+    if (at === -1) break;
+    let depth = 0;
+    let index = at + callee.length;
+    for (; index < text.length; index++) {
+      const ch = text[index];
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    found.push({ args: text.slice(at + callee.length + 1, index), at });
+    from = index + 1;
+  }
+  return found;
+}
+
+const reportCalls = [];
+for (const file of walk(join(ROOT, 'src/ui'), [], /\.tsx?$/)) {
+  const rel = file.replace(ROOT + '/', '');
+  // `import { reportBatch }` 不是调用点，剥注释后仍会命中，用「实参含 length」兜住
+  for (const call of callArgs(stripComments(readFileSync(file, 'utf8')), 'reportBatch')) {
+    if (/\b\w+\.length\b/.test(call.args)) reportCalls.push(rel);
+  }
+}
+
+if (reportCalls.length === 0) {
+  pass('视图层交完整结果', '所有 reportBatch 调用均传结果数组');
+} else {
+  fail(
+    '视图层只交个数',
+    [...new Set(reportCalls)].join('、'),
+    '不得把 .length 当播报依据',
+    '只交个数就丢掉 name 与 message，失败项既说不清是谁也说不清为什么',
+  );
+}
+
+/*
+ * 环 3：反向禁令 —— 「见下方」后面必须跟一个真实区域名。
+ *
+ * 这句话本身没有错，错在它指的东西当时并不存在。首版把「原因见下方」整个
+ * 列进黑名单，结果把修好之后的正确写法（`逐条原因见下方「命令输出」`）
+ * 也拦住了 —— 黑名单太宽会逼着人绕开正确表达。
+ *
+ * 改成的规则是形状判定：凡出现「见下方」，其后 12 个字符内必须有一个
+ * 「」包起来的区域名。这样「见下方记录」被拦下（没引号），
+ * 「见下方「命令输出」」放行（点名了用户抬头就能找到的面板）。
+ */
+const DANGLING_PHRASES = ['见下方记录', '见下方日志', '详见下方'];
+const dangling = [];
+
+for (const file of walk(join(ROOT, 'src'), [], /\.tsx?$/)) {
+  const rel = file.replace(ROOT + '/', '');
+  const text = stripComments(readFileSync(file, 'utf8'));
+
+  for (const phrase of DANGLING_PHRASES) {
+    if (text.includes(phrase)) dangling.push(`${rel} 「${phrase}」`);
+  }
+
+  // 「见下方」后没有紧接区域名 —— 用户会被指去一个不存在的地方
+  for (const match of text.matchAll(/见下方/g)) {
+    const after = text.slice(match.index + 3, match.index + 15);
+    if (!after.startsWith('「')) dangling.push(`${rel} 「见下方${after.slice(0, 6)}…」`);
+  }
+}
+
+dangling.length === 0
+  ? pass('失败指引不指空', `「见下方」后均带真实区域名（另查 ${DANGLING_PHRASES.length} 个历史短语）`)
+  : fail('无着落指代', [...new Set(dangling)].join('、'), '换成一个「」包起来的真实区域名', '提示用户去看一个不存在的地方，比不给提示更糟');
+
+/*
+ * 环 4：逐条明细不得被 80 ms 合并窗口吃掉。
+ *
+ * 这一条是反向探针逼出来的真缺陷：`pushOutput` 会把同频道 80 ms 内的连续
+ * 文本合并进同一个 DOM 节点（为底层读回调设计的），而批量失败明细恰恰是
+ * 「各自独立的行」。实测 20 条明细只量到 1 个 `.term-line`，20 个包名连成
+ * 一片 —— 探针脚本第一版跑出「终端逐条列出失败项：1 行」才发现。
+ *
+ * 判据：`reportBatch` 里推明细时显式关掉合并。参数名写死是因为它就是
+ * `pushOutput` 的契约，改名会同时触发类型检查，不会静默失效。
+ */
+if (actionsCode) {
+  const linePush = /pushOutput\s*\(\s*'stderr'\s*,\s*line\s*,\s*\{\s*merge:\s*false\s*\}\s*\)/.test(
+    actionsCode,
+  );
+  const mergeSupported = /merge\?:\s*boolean/.test(codeOf('src/ui/state/app-state.ts') ?? '');
+
+  if (!mergeSupported) {
+    fail('逐条明细不被合并', 'pushOutput 支持 merge 参数', '缺失', '逐条明细只能挤在同一个 DOM 节点里');
+  } else if (!linePush) {
+    fail(
+      '逐条明细不被合并',
+      'reportBatch 推明细时 merge: false',
+      '未关闭合并',
+      '80 ms 内的多条失败会拼成一行，用户没法逐条读',
+    );
+  } else {
+    pass('逐条明细不被合并', 'pushOutput 支持 merge 开关，明细逐条成行');
+  }
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

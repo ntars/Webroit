@@ -141,13 +141,29 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
             : await uninstallApps(current, names);
       if (outcome.status === 'cancelled') return;
 
-      const ok = outcome.value.filter((item) => item.success).length;
-      reportBatch(names.length, ok, ACTION_DONE[action].replace('已', ''));
+      /*
+       * 播报交完整结果数组，不能只交「成功几个」。
+       *
+       * 失败项的名称与原因全在 `BatchResult.message` 里 —— 只数个数就把它们
+       * 扔了，于是提示条上那句「逐条原因见下方记录」的下方什么都不存在。
+       */
+      reportBatch(
+        outcome.value.map((item) => ({
+          target: item.name,
+          ok: item.success,
+          message: item.message,
+        })),
+        ACTION_DONE[action].replace('已', ''),
+      );
 
       // 局部同步状态，不重读整表
+      const succeeded = new Set(
+        outcome.value.filter((item) => item.success).map((item) => item.name),
+      );
       setEntries((prev) =>
         prev.map((entry) => {
-          if (!selected.has(entry.name)) return entry;
+          // 失败的项不改本地状态 —— 让界面与设备保持一致
+          if (!succeeded.has(entry.name)) return entry;
           if (action === 'enable') return { ...entry, disabled: false };
           if (action === 'disable') return { ...entry, disabled: true };
           return entry;

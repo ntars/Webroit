@@ -107,8 +107,15 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
           : await disableVendor(current, names);
       if (outcome.status === 'cancelled') return;
 
-      const ok = outcome.value.filter((item) => item.ok).length;
-      reportBatch(names.length, ok, action === 'enable' ? '恢复' : '停用');
+      // 同 AppsView：交完整结果数组，失败项的名称与原文才有出口
+      reportBatch(
+        outcome.value.map((item) => ({
+          target: item.package,
+          ok: item.ok,
+          message: item.message,
+        })),
+        action === 'enable' ? '恢复' : '停用',
+      );
       setSelected(new Set());
       await scan();
     } catch (caught) {

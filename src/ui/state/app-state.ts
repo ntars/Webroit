@@ -80,15 +80,31 @@ export const disconnectReason = signal<'user' | 'lost' | null>(null);
 
 /* ─────────────────────── 动作 ─────────────────────── */
 
-/** 追加终端输出，自动合并连续同频道文本并限制总行数 */
-export function pushOutput(channel: OutputChannel, text: string): void {
+/**
+ * 追加终端输出。
+ *
+ * 默认会把 80 ms 内同频道的连续片段合并进同一行 —— 这是为底层读回调设计的：
+ * 一个命令的返回可能分几十块到达，逐块成行会把终端刷成碎片。
+ *
+ * 但「合并」的前提是**这些片段是同一段文本的续写**。批量操作的逐条失败明细
+ * 恰恰相反：它们是各自独立的行，合并后 20 个包名会挤进同一个 DOM 节点，
+ * 视觉上连成一片、无法逐条读（T-016 实测：20 条明细只量到 1 个 `.term-line`）。
+ * 所以这类调用要显式传 `{ merge: false }`。
+ *
+ * @param merge 是否允许与上一行合并；独立事件（逐条明细、审计播报）传 false
+ */
+export function pushOutput(
+  channel: OutputChannel,
+  text: string,
+  { merge = true }: { merge?: boolean } = {},
+): void {
   const trimmed = text.replace(/\r\n/g, '\n');
   if (!trimmed) return;
 
   terminalLines.set((prev) => {
     const last = prev[prev.length - 1];
     // 同频道的连续片段合并，避免每条 read 回调都生成一行
-    if (last && last.channel === channel && Date.now() - last.at < 80) {
+    if (merge && last && last.channel === channel && Date.now() - last.at < 80) {
       const merged = [...prev];
       merged[merged.length - 1] = { ...last, text: last.text + trimmed, at: Date.now() };
       return merged;
