@@ -388,6 +388,98 @@ check(
   `${single.outcome} / ${Math.round(single.elapsed)} ms`,
 );
 
+/* ── 5. 用户点「中止」也要能停到底层（操作级取消） ── */
+/*
+ * 这一组守的是另一条取消源。
+ *
+ * 前面 4 组测的都是「拔线」—— 由 `resetConnection()` 调 `shell.abort()` 触发，
+ * 连接级、不可逆。而工具卡片上的「中止」按钮走的是完全另一套：卡片自己
+ * `new AbortController()`，原本只把 signal 交给 `tool.run()`。
+ *
+ * 实测缺口：26 个工具里只有 2 个真的把 signal 往下传，其余 24 个写
+ * `run({ input })`，直接 `requireServices().apps.disable(...)`。命令走 `shell()`，
+ * 而 `shell()` 只认自己的信号 —— 点中止，卡片停了转圈，命令继续跑到 USB 超时，
+ * 设备照旧被改。用户以为停住了，其实没有。
+ *
+ * 这里直接量 `runScoped()`：作用域内先跑一条，再模拟用户点中止，
+ * 然后确认三件事 —— 立刻返回、不再发命令、连接级状态没被污染。
+ */
+const scoped = await evaluate(`
+  (async () => {
+    const { ShellContext } = await import('/src/core/shell.ts');
+
+    const sent = [];
+    let hangResolve = null;
+    const driver = {
+      serial: 'PROBE0004', label: '可中止设备', connected: true,
+      async exec(command) {
+        sent.push(command);
+        if (sent.length >= 1) return new Promise((resolve) => { hangResolve = resolve; });
+        return { stdout: 'Success', stderr: '', exitCode: 0 };
+      },
+      async openTerminal() { throw new Error('x'); }, async write() {},
+      async read() { return new Blob(); }, async control() { return ''; },
+      async reboot() {}, async close() {},
+    };
+    const shell = new ShellContext({ driver });
+
+    const controller = new AbortController();
+    const started = performance.now();
+
+    /*
+     * 模拟 tool.run() 的内部形状：先发一条命令，中间还有一段不经过命令的等待
+     * （文件分块上传、采样间隔都属于这一类），然后再发下一条。
+     * 中止之后那一条必须被拦在出口 —— 否则界面已经说「已取消」，日志里还在出新命令。
+     */
+    const running = shell.runScoped(controller.signal, async () => {
+      await shell.mutation('pm disable-user --user 0 com.probe.scoped');
+      await new Promise(r => setTimeout(r, 400));
+      await shell.text('echo should-not-send').catch(() => null);
+      return 'done';
+    });
+
+    for (let i = 0; i < 50 && sent.length === 0; i++) await new Promise(r => setTimeout(r, 20));
+    const atAbort = sent.length;
+    // 这正是卡片「中止」按钮做的事
+    controller.abort(new Error('用户已取消'));
+
+    const outcome = await Promise.race([
+      running.then(() => 'ok', () => 'rejected'),
+      new Promise(r => setTimeout(() => r('hung'), 20000)),
+    ]);
+    const outerElapsed = performance.now() - started;
+
+    // 等内层那段等待自然走完，看它那条命令有没有真的发出去
+    await new Promise(r => setTimeout(r, 600));
+
+    return {
+      outcome,
+      elapsed: outerElapsed,
+      atAbort,
+      totalSent: sent.length,
+      connectionAborted: shell.aborted,
+      waitingOnDriver: Boolean(hangResolve),
+    };
+  })()
+`);
+
+check('用户中止后卡片执行不挂死', scoped.outcome !== 'hung', scoped.outcome);
+check(
+  '用户中止后立即返回',
+  scoped.outcome === 'rejected' && scoped.elapsed < 5000,
+  `${scoped.outcome} / ${Math.round(scoped.elapsed)} ms`,
+);
+check(
+  '中止只发出一条命令，之后不再空转',
+  scoped.totalSent === scoped.atAbort,
+  `中止时 ${scoped.atAbort} 条，结束时 ${scoped.totalSent} 条`,
+);
+check(
+  '操作级中止不污染连接：shell 仍可用',
+  scoped.connectionAborted === false,
+  `aborted=${scoped.connectionAborted}`,
+);
+
 /* ── 输出 ── */
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

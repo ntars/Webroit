@@ -110,13 +110,27 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
     const controller = new AbortController();
     abortRef.current = controller;
 
+    /*
+     * 用 `runScoped()` 包住整次执行，而不是把 signal 只喂给 `tool.run()`。
+     *
+     * 26 个工具里只有 2 个（文件安装 / 传输）真的把 `signal` 往下传，
+     * 其余 24 个写的是 `run({ input })` —— 它们直接
+     * `requireServices().apps.disable(...)`，命令走 `shell()` 出口。
+     * 只把 signal 交给 `tool.run()` 的话，那 24 个工具根本收不到，
+     * 界面上点「中止」按钮转圈会停、底层命令照跑直到 USB 超时。
+     *
+     * `runScoped()` 在出口登记一次，作用域内发出的所有命令自动组合这个信号，
+     * 于是「中止」对全部 26 个工具都成立，不需要逐个补参数。
+     */
     const invoke = () =>
-      tool.run({
-        shell: ctx.shell,
-        capabilities: ctx.capabilities,
-        input: values,
-        signal: controller.signal,
-      });
+      ctx.shell.runScoped(controller.signal, () =>
+        tool.run({
+          shell: ctx.shell,
+          capabilities: ctx.capabilities,
+          input: values,
+          signal: controller.signal,
+        }),
+      );
 
     try {
       /*

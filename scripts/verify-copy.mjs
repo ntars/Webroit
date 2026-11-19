@@ -1105,6 +1105,58 @@ if (!shellRaceCall) {
   pass('单条命令路径可被打断', 'shell() 统一 race finalSignal，覆盖全部 76 处命令调用');
 }
 
+/*
+ * 环 3c：用户点「中止」必须能停到底层命令。
+ *
+ * 环 3 / 3b 守的都是「拔线能不能停手」—— 那条路径由 `resetConnection()`
+ * 调 `shell.abort()` 触发，链路是通的。但用户主动点卡片上的「中止」走的是
+ * 另一套：卡片自己 `new AbortController()`，只把 signal 交给 `tool.run()`。
+ *
+ * 实测缺口：26 个工具里只有 2 个（`files.install` / `files.transfer`）
+ * 真的把 `ToolContext.signal` 往下传给服务层，其余 24 个写的是
+ * `run({ input })`，直接 `requireServices().apps.disable(...)`。命令走
+ * `shell()`，而 `shell()` 只认自己的 `#abort` 与调用点显式传的 signal ——
+ * 卡片那个 controller 与它毫无关系。表现是：点中止，卡片停止转圈（界面
+ * 说「已取消」），底层命令继续跑到自己回来或者 USB 超时，设备照旧被改。
+ *
+ * 断言四条：
+ *   1. `shell` 提供操作级作用域 `runScoped`（不是让 26 个工具各传一次 signal）
+ *   2. `runScoped` 的信号真的进了 `#composeSignal`（不是登记了但没接线）
+ *   3. 工具卡片确实用 `runScoped` 包住执行
+ *   4. 卡片不得调 `shell.abort()` —— 那是连接级、不可逆，点一次中止就把
+ *      整条连接废掉，之后每个操作都会立刻失败
+ */
+const runScopedDefined = /async runScoped\s*</.test(shellCode);
+const scopedInCompose = /this\.#scoped/.test(shellCode) && /\.\.\.this\.#scoped/.test(shellCode);
+const toolCardCode = codeOf('src/ui/components/ToolCard.tsx') ?? '';
+const cardUsesRunScoped = /shell\.runScoped\s*\(/.test(toolCardCode);
+const cardNeverAbortsShell = !/shell\.abort\s*\(/.test(toolCardCode);
+
+if (!runScopedDefined || !scopedInCompose) {
+  fail(
+    '用户中止能停到底层',
+    `ShellContext.runScoped ${runScopedDefined} / 信号合入 #composeSignal ${scopedInCompose}`,
+    '两项都要',
+    '卡片自己的 controller 与 shell() 无关，点中止只停界面，命令照跑到 USB 超时',
+  );
+} else if (!cardUsesRunScoped) {
+  fail(
+    '用户中止能停到底层',
+    'ToolCard 用 runScoped 包住执行',
+    '未使用',
+    '24 个不传 signal 的工具（冻结应用、改分辨率、卸载）中止后命令仍在跑',
+  );
+} else if (!cardNeverAbortsShell) {
+  fail(
+    '用户中止能停到底层',
+    'ToolCard 调用了 shell.abort()',
+    '不该调用',
+    '那是连接级永久中止，点一次「中止」会让整条连接上后续所有操作立刻失败',
+  );
+} else {
+  pass('用户中止能停到底层', 'runScoped 在 shell 出口登记作用域信号，卡片统一走它且不碰连接级 abort');
+}
+
 // 环 4：剩余项标 skipped，播报不混成失败
 const marksSkipped = /skipped:\s*true/.test(appServiceCode) && /skipped:\s*true/.test(vendorServiceCode);
 const reportKnowsSkipped = /pickSkipped/.test(batchReportCode ?? '');

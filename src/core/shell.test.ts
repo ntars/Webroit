@@ -156,8 +156,114 @@ describe('ShellContext 取消语义', () => {
   });
 });
 
-describe('ShellContext 命令留痕', () => {
-  it('commandMark 之后能按序号切出本次执行的命令', async () => {
+/*
+ * 操作级取消（`runScoped`）。
+ *
+ * 这一组守的是「工具卡片上那个中止按钮到底有没有用」。
+ *
+ * 背景：26 个工具里只有 2 个（文件安装 / 传输）把 `ToolContext.signal`
+ * 交给服务层，其余 24 个写 `run({ input })`，直接
+ * `requireServices().apps.disable(...)`。命令走 `shell()`，
+ * 而 `shell()` 只认自己的 `#abort` 与调用点显式传的 signal ——
+ * 于是「冻结一个应用」时点中止，按钮只会让卡片停止转圈，
+ * 底层命令照样跑完或等到 USB 超时。
+ *
+ * 与 `abort()` 的关键区别：`abort()` 是连接级、一次性、永久；
+ * `runScoped` 是操作级、随一次操作生灭 —— 点中止不该把整条连接废掉，
+ * 否则后续每一个操作都会立刻失败。
+ */
+describe('ShellContext 操作级取消', () => {
+  it('作用域内发出的命令正常执行', async () => {
+    const shell = new ShellContext({ driver: makeDriver(async () => ok('done')) });
+    const controller = new AbortController();
+
+    const output = await shell.runScoped(controller.signal, () => shell.text('echo hi'));
+
+    expect(output).toBe('done');
+  });
+
+  it('作用域中止后，作用域里后续命令一条都不发', async () => {
+    let sent = 0;
+    const shell = new ShellContext({
+      driver: makeDriver(async () => {
+        sent += 1;
+        return ok();
+      }),
+    });
+    const controller = new AbortController();
+
+    const work = shell.runScoped(controller.signal, async () => {
+      await shell.text('echo before');
+      // 不含命令的等待：文件分块上传、采样间隔都属于这一类
+      await new Promise((r) => setTimeout(r, 40));
+      // 中止之后再发一条就是朝一条已经没人管的链路空转，必须被拦在出口
+      await shell.text('echo after').catch(() => {});
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+    controller.abort(new Error('用户已取消'));
+
+    // 外层也要立刻拿到控制权，不能等里面那段等待自己走完
+    const outcome = await within(work, 500);
+    expect(outcome.state).toBe('failed');
+
+    // 给里面那条被拦下的命令一点时间（若真发出去了，sent 会变 2）
+    await new Promise((r) => setTimeout(r, 60));
+    expect(sent).toBe(1);
+  });
+
+  it('正在执行的那一条被作用域中止打断', async () => {
+    const shell = new ShellContext({ driver: makeDriver(() => neverSettles()) });
+    const controller = new AbortController();
+
+    const running = shell.runScoped(controller.signal, () => shell.text('pm list packages'));
+    await new Promise((r) => setTimeout(r, 20));
+    controller.abort(new Error('用户已取消'));
+
+    const outcome = await within(running, 500);
+    expect(outcome.state).toBe('failed');
+    if (outcome.state === 'failed') {
+      expect(String((outcome.error as Error)?.message)).toMatch(/用户已取消/);
+    }
+  });
+
+  it('作用域结束后取消源被注销，后续命令不受影响', async () => {
+    const shell = new ShellContext({ driver: makeDriver(async () => ok('later')) });
+    const controller = new AbortController();
+
+    await shell.runScoped(controller.signal, () => shell.text('echo one'));
+    // 作用域外的中止不该有任何影响 —— 注销没做干净，这里会拒绝
+    controller.abort(new Error('用户已取消'));
+
+    expect(await shell.text('echo two')).toBe('later');
+    expect(shell.aborted).toBe(false);
+  });
+
+  it('操作级中止不污染连接级状态：aborted 仍为 false', async () => {
+    const shell = new ShellContext({ driver: makeDriver(() => neverSettles()) });
+    const controller = new AbortController();
+
+    const running = shell.runScoped(controller.signal, () => shell.text('pm disable-user x'));
+    await new Promise((r) => setTimeout(r, 20));
+    controller.abort(new Error('用户已取消'));
+    await within(running, 500);
+
+    /*
+     * 这是与 `shell.abort()` 的分水岭：连接级中止把 `aborted` 置真且不可逆，
+     * 之后的每一条命令都会直接失败。用户点一次「中止」不该有这种副作用 ——
+     * 他只是不想跑这一条，不是要断设备。
+     */
+    expect(shell.aborted).toBe(false);
+    expect(shell.signal.aborted).toBe(false);
+  });
+
+  it('没传 signal 时行为与直接执行一致', async () => {
+    const shell = new ShellContext({ driver: makeDriver(async () => ok('plain')) });
+    expect(await shell.runScoped(undefined, () => shell.text('echo hi'))).toBe('plain');
+  });
+});
+
+describe('ShellContext 命令留痕', () => {  it('commandMark 之后能按序号切出本次执行的命令', async () => {
     const shell = new ShellContext({ driver: makeDriver(async () => ok()) });
     await shell.text('echo one');
 

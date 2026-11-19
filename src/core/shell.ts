@@ -75,6 +75,15 @@ export class ShellContext {
   #abort = new AbortController();
 
   /**
+   * 在途的「操作级」取消信号。
+   *
+   * 与 `#abort` 的区别是生命周期：`#abort` 一响这条连接就废了（永久），
+   * 这里的信号随一次操作生灭 —— 用户点卡片上的「中止」只该停这一次，
+   * 不该把整条连接一起废掉（那样后续所有操作都会立刻失败）。
+   */
+  #scoped = new Set<AbortSignal>();
+
+  /**
    * 最近执行过的命令环形缓冲。
    *
    * 存在的理由：审计日志要记「这次操作实际跑了哪些命令」，
@@ -152,21 +161,85 @@ export class ShellContext {
 
   /** 每次调用都拿一个新的复合 signal：外部 signal 与内部 abort 谁先触发都生效 */
   #composeSignal(signal?: AbortSignal): AbortSignal {
-    if (!signal) return this.#abort.signal;
+    /*
+     * 三个来源都要合：
+     * 1. `this.#abort`      —— 连接级。拔线时整条会话一起停。
+     * 2. `signal`           —— 单次调用级。某个调用点自己传进来的。
+     * 3. `#scoped`          —— 操作级。`runScoped()` 登记的那一段操作。
+     *
+     * 第 3 个是 T-019 补的：在这之前，工具卡片上的「中止」只能停住卡片自己
+     * 那一次 await，服务层内部发出的命令根本不知道有这回事 —— 按钮看着生效
+     * （界面停了转圈），底层命令照跑，直到自己回来或 USB 超时。
+     */
+    const all = [
+      this.#abort.signal,
+      ...(signal ? [signal] : []),
+      ...this.#scoped,
+    ].filter((item, index, list) => list.indexOf(item) === index);
+
+    // 只有一根信号时不必包一层，省一个对象
+    if (all.length === 1) return all[0];
+
     // AbortSignal.any 在 Chrome 116+ 可用，WebUSB 场景下浏览器版本足够新。
     // 运行时仍做一次存在性判断，避免个别内核缺失时直接抛错。
     if (typeof AbortSignal.any === 'function') {
-      return AbortSignal.any([signal, this.#abort.signal]);
+      return AbortSignal.any(all);
     }
     // 兜底：手动桥接
     const controller = new AbortController();
-    const forward = () => controller.abort(signal.reason ?? this.#abort.signal.reason);
-    if (signal.aborted || this.#abort.signal.aborted) forward();
+    const forward = () => controller.abort(all.find((item) => item.aborted)?.reason);
+    if (all.some((item) => item.aborted)) forward();
     else {
-      signal.addEventListener('abort', forward, { once: true });
-      this.#abort.signal.addEventListener('abort', forward, { once: true });
+      for (const item of all) item.addEventListener('abort', forward, { once: true });
     }
     return controller.signal;
+  }
+
+  /**
+   * 把「一段操作」的取消信号登记进上下文，操作期间发出的所有命令都认它。
+   *
+   * 为什么需要这一层，而不是让每个工具自己把 signal 传下去：
+   * 26 个工具里**只有 2 个**（`files.install` / `files.transfer`）真的把
+   * `ToolContext.signal` 交给了服务层，其余 24 个都写 `run({ input })`，
+   * 直接 `requireServices().apps.disable(...)`。命令最终都走 `shell()`，
+   * 而 `shell()` 只认自己的 `#abort` 与调用点显式传的 signal ——
+   * 于是「冻结一个应用」这类操作，卡片上的「中止」按钮完全打不到它。
+   *
+   * 与其给 24 个工具逐个补 signal 参数（新增一个工具又漏一个），
+   * 不如在出口登记一次：`runScoped()` 期间发出的命令自动组合这个信号。
+   * 这是「能力是不是所有调用方都需要」的判据 —— 是，就收到出口。
+   *
+   * 作用域结束（成功 / 失败 / 中止）就注销，不会污染下一次操作。
+   */
+  async runScoped<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+    if (!signal) return work();
+    this.#scoped.add(signal);
+
+    /*
+     * 注销必须挂在**内层任务真正结束**上，不能挂在 race 的结果上。
+     *
+     * 这件事是测试打红之后才看清的：race 输掉时（用户点了中止）外层立刻
+     * 拿到控制权并跑 finally，如果在那里注销，内层那段代码其实还在往下跑 ——
+     * 它后面再发的命令就都落在作用域之外，一条条照发不误。表现为「界面已经
+     * 停了，日志里还在出新命令」，正是这个按钮最初要解决的问题。
+     *
+     * 所以改成：注销挂在内层的 finally 上；外层只负责把控制权还给调用方。
+     * 内层从被中止到真正退出这段时间里，它发起的命令仍会被拦在出口。
+     */
+    const settle = (async () => {
+      try {
+        return await work();
+      } finally {
+        this.#scoped.delete(signal);
+      }
+    })();
+
+    /*
+     * 这里也要 race：命令层已经在 `shell()` 里 race 过了，但工具里还有
+     * 不经过命令的等待（文件分块上传、采样间隔 sleep）。只在命令层 race
+     * 的话，卡在分块上传里那一步照样停不下来。
+     */
+    return raceAbort(settle, this.#composeSignal());
   }
 
   /**
