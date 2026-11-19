@@ -9,8 +9,9 @@
 import { useState } from 'preact/hooks';
 
 import { isWebUsbSupported } from '@/core/transport/driver';
+import { explainError } from '@/core/error-copy';
 import { connectDevice } from '@/ui/state/connect';
-import { pushOutput } from '@/ui/state/app-state';
+import { toast } from '@/ui/state/app-state';
 
 export interface ConnectResult {
   /** 走完整的连接链路；已连接时直接返回 true */
@@ -38,10 +39,12 @@ export function useConnect(): ConnectResult {
       return outcome.status === 'ok';
     } catch (error) {
       /*
-       * 链路内部已经把失败翻译成提示了，这里兜的是它自己抛错的情况
-       * （理论上不该有，但不能让按钮永远停在转圈）。
+       * 链路内部已经把失败翻成「原因 + 下一步」并弹过提示了，
+       * 这里兜的是它自己抛错的情况（理论上不该有，但不能让按钮
+       * 永远停在转圈）。文案仍走翻译层 —— 直接抛原文等于把
+       * adb 的英文报错丢给用户，绕过了本项目唯一的翻译出口。
        */
-      pushOutput('stderr', error instanceof Error ? error.message : String(error));
+      toast('error', explainError(error).reason);
       return false;
     } finally {
       setBusy(false);

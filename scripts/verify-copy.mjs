@@ -172,7 +172,16 @@ function walk(dir, out = [], pattern = /\.tsx$/) {
   return out;
 }
 
-const uiFiles = walk(join(ROOT, 'src/ui'));
+/*
+ * 扫描范围分两套。
+ *
+ * `BARE_RENDER` 是 JSX 形状（`<p>{error}</p>`），只可能出现在 `.tsx` 里。
+ * 而手写字符串化是纯 TS 写法 —— 本轮就在 `src/ui/hooks/use-connect.ts`
+ * 里发现了一处，原脚本只扫 `.tsx`，于是它一直没被抓住。
+ * 「界面层绕过翻译层」与文件扩展名无关，`.ts` 里的 hook 一样会往界面写文案。
+ */
+const uiTsxFiles = walk(join(ROOT, 'src/ui'), [], /\.tsx$/);
+const uiFiles = walk(join(ROOT, 'src/ui'), [], /\.tsx?$/);
 
 /**
  * 违规写法：把异常原文直接当正文渲染。
@@ -181,26 +190,35 @@ const uiFiles = walk(join(ROOT, 'src/ui'));
  * 若 error 已经是 Explanation 对象，Form 结构就不一样了，不会命中这条正则。
  */
 const BARE_RENDER = /<p>\s*\{error\}\s*<\/p>/;
-const INLINE_STRINGIFY = /caught instanceof Error \? caught\.message : String\(caught\)/;
+/*
+ * 手写字符串化。
+ *
+ * 原来的正则写死了变量名 `caught`，于是 `error instanceof Error ? error.message : String(error)`
+ * 这类换名写法全都漏过去了 —— 本轮在 `use-connect` 里就发现一处。
+ * 现在按形状匹配：任意标识符 + `instanceof Error` + `.message`，名字不限。
+ */
+const INLINE_STRINGIFY = /\b\w+\s+instanceof\s+Error\s*\?\s*\w+\.message\s*:\s*String\s*\(/;
 
 const bareHits = [];
 const stringifyHits = [];
 for (const file of uiFiles) {
   const text = readFileSync(file, 'utf8');
   const rel = file.replace(ROOT + '/', '');
+  const isTsx = file.endsWith('.tsx');
   // 逐行判断，避免多行 JSX 被整块吞掉
   text.split('\n').forEach((line, index) => {
-    if (BARE_RENDER.test(line)) bareHits.push(`${rel}:${index + 1}`);
+    // JSX 形状只可能在 .tsx 里出现；在 .ts 里搜它是白费力气，还会误报字符串里的示例
+    if (isTsx && BARE_RENDER.test(line)) bareHits.push(`${rel}:${index + 1}`);
     if (INLINE_STRINGIFY.test(line)) stringifyHits.push(`${rel}:${index + 1}`);
   });
 }
 
 bareHits.length === 0
-  ? pass('无裸异常直出', `${uiFiles.length} 个 tsx 文件`)
+  ? pass('无裸异常直出', `${uiTsxFiles.length} 个 tsx 文件`)
   : fail('裸异常直出界面', bareHits.length, bareHits.join('、'));
 
 stringifyHits.length === 0
-  ? pass('无手写错误字符串化', `${uiFiles.length} 个 tsx 文件`)
+  ? pass('无手写错误字符串化', `${uiFiles.length} 个 ts/tsx 文件`)
   : fail('手写错误字符串化', stringifyHits.length, stringifyHits.join('、'));
 
 /* 四类情形的落点必须都在：找到承载它们的组件才算闭环 */
