@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 87 个源文件、18,244 行（含 CSS 与测试） |
-| 产物规模 | 486 KB / 12 个文件，首屏 gzip 约 62 KB |
+| 代码规模 | 92 个源文件、18,904 行（含 CSS 与测试） |
+| 产物规模 | 491 KB / 12 个文件，首屏 gzip 约 63 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -668,7 +668,7 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 10 个文件、187 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`、`/ui/components/error-boundary-copy`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 11 个文件、194 个用例，全部落在不碰 DOM 的纯函数层（另有确认门槛的 7 个用例在 `/ui/state/confirm`）（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`、`/ui/components/error-boundary-copy`、`/ui/state/confirm`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 其中 `src/tools/builtin.test.ts` 是注册表快照测试：工具定义按分区拆到 `src/tools/defs/` 下七个文件后，拼装顺序只由 `builtin.ts` 一处决定，漏掉一行展开符号（比如忘了 `...vendorToolsAll`）typecheck 照样通过，但品牌专区分区会整块消失。该测试锁住 34 / 26 / 24 三个数字、分区分布、id 唯一性与品牌配对。
 
@@ -1059,13 +1059,13 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 156.8 KB | 53.6 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.js` | 161.2 KB | 55.5 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
 | `index-*.css` | 41.9 KB | 7.5 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
 | 图标合计 | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
-| **首屏合计** | **约 201 KB** | **约 62 KB** | JS + CSS + HTML，不含图标 |
-| **全量产物** | **486 KB** | **—** | `dist/` 12 个文件 |
+| **首屏合计** | **约 206 KB** | **约 64 KB** | JS + CSS + HTML，不含图标 |
+| **全量产物** | **491 KB** | **—** | `dist/` 12 个文件 |
 
 构建耗时 0.8 秒，模块数 180。类型检查 `tsc --noEmit` 零错误。
 
@@ -1133,6 +1133,10 @@ grep -rhoE "https?://[a-zA-Z0-9._/-]+" dist/ | sort -u          # 仅剩 5 条�
 | 1 | 可逆 | 点即执行，改前自动记快照 | 写操作记录 |
 | 2 | 需确认 | 弹确认框（可在偏好里关闭） | 写操作记录 |
 | 3 | 高危 | 弹确认框 + 要求手打确认词，不受偏好开关影响 | 写操作记录 |
+
+**同一件事从哪个入口进来，门槛都一样**。风险分级不只在工具卡片上生效 ——「应用管理」列表里的冻结 / 启用 / 停止 / 批量冻结 / 批量卸载，以及「品牌专区」的停用选中，全部经同一条治理路径（`src/ui/state/actions.ts` 的 `runMutation()`：先按 `gateFor()` 判门槛，再串 `audited()` 留底）。
+
+这条约束不是设计出来的，是实测发现的：早期列表里的「批量卸载」直接调服务层，勾选应用点一下就卸了，既没有确认也没有记录；而同一件事在工具卡片里是 risk 3、要求手打「确认」。所以门槛判定只有 `gateFor()` 一处，服务调用只有 `src/ui/state/mutations.ts` 一张表，`verify:copy` 会扫视图层是否出现该表之外的变更调用。
 
 **没有实现权限声明字段**。`available()` 判定依据的是连接时探测到的真实能力，而非静态声明的 `none` / `shell+` / `root` / `bootloader` 标签。这样做的理由是静态标签会过期：同一命令在不同 ROM 上的权限要求不同，声明的标签反而是误导。
 
@@ -1313,7 +1317,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 187 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 194 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1380,7 +1384,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 83 个 `.ts` / `.tsx` 文件、0 处 `any`（含 10 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 88 个 `.ts` / `.tsx` 文件、0 处 `any`（含 11 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

@@ -684,6 +684,79 @@ textarea.input {
   line-height: var(--leading-normal);
 }
 
+/* ─────────────── 确认弹层 ─────────────── */
+
+/*
+ * 与偏好面板同一套形态（遮罩 + 居中卡片），但层级压在 --z-modal 之上。
+ *
+ * 为什么必须更高：确认可能从偏好面板里的操作、或未来从任何模态内触发，
+ * 盖在底下会让「确认按钮点不到」变成一个新的死路。
+ * 仍低于 --z-toast：确认结果的那条提示必须看得见。
+ *
+ * 宽度收到 420px：这里只有一句话、可能一个输入框和两个按钮，
+ * 拉宽会让「取消」与「确认」隔开半屏，反而增加误点。
+ */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--scrim);
+}
+
+.confirm-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm-sheet__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.confirm-sheet__reason {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+}
+
+/*
+ * 目标清单用次级小字并限制高度：批量卸载可能勾了三十个包名，
+ * 全铺开会把「确认」按钮顶出视口 —— 那会让用户以为按钮坏了。
+ */
+.confirm-sheet__detail {
+  max-height: 96px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: var(--leading-normal);
+  word-break: break-all;
+}
+
+/* 取消在左、确认在右：与系统对话框的既有习惯一致，右手拇指先碰到取消 */
+.confirm-sheet__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
 /* ─────────────── 窄屏触控尺寸 ─────────────── */
 @media (max-width: 768px) {
   .btn,

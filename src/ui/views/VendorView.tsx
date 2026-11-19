@@ -22,6 +22,8 @@ import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
 import { ErrorNotice } from '@/ui/components/ErrorNotice';
+import { reportBatch } from '@/ui/state/actions';
+import { disableVendor, enableVendor } from '@/ui/state/mutations';
 
 interface Props {
   tools: Tool[];
@@ -92,14 +94,21 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
   const apply = async (action: 'disable' | 'enable') => {
     if (!current || selected.size === 0 || busy) return;
     setBusy(true);
+    const names = [...selected];
     try {
-      const names = [...selected];
-      const results =
+      /*
+       * 走动作规格表而不是直调服务：停用系统组件是变更操作，
+       * 与工具卡片里同一件事共用确认门与审计留底。
+       * 上一版这里是裸调用 —— 勾选十几个组件点一下就全停了，没有一句确认。
+       */
+      const outcome =
         action === 'enable'
-          ? await current.vendorService.enable(names)
-          : await current.vendorService.disable(names);
-      const ok = results.filter((item) => item.ok).length;
-      toast('success', `${names.length} 个组件，成功 ${ok} 个`);
+          ? await enableVendor(current, names)
+          : await disableVendor(current, names);
+      if (outcome.status === 'cancelled') return;
+
+      const ok = outcome.value.filter((item) => item.ok).length;
+      reportBatch(names.length, ok, action === 'enable' ? '恢复' : '停用');
       setSelected(new Set());
       await scan();
     } catch (caught) {

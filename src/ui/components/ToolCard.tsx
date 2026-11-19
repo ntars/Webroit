@@ -24,15 +24,13 @@ import { useSignal } from '@/ui/state/signal';
 import { useConnect } from '@/ui/hooks/use-connect';
 import { ResultView } from '@/ui/components/ResultView';
 import { ErrorNotice } from '@/ui/components/ErrorNotice';
+import { CONFIRM_WORD, gateFor } from '@/ui/state/confirm';
 
 interface Props {
   tool: Tool;
   expanded: boolean;
   onToggle: () => void;
 }
-
-/** 危险操作要求的确认词 */
-const DANGER_WORD = '确认';
 
 export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle }) => {
   const current = useSignal(services);
@@ -70,18 +68,20 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
   const unsupported = availability !== true;
   const reason = typeof availability === 'string' ? availability : null;
 
-  /**
+  /*
    * 确认门槛。
    *
-   * `confirmDangerous` 关掉后，风险 2 级（需确认）直接放行 ——
-   * 用户明确表示「我知道自己在做什么，别每次都问」。
-   * 但风险 3 级（高危）不受该开关影响，仍然要求手打确认词：
-   * 卸载应用、清数据、进 EDL 这类操作没有撤销路径，
-   * 一次误点就要重刷机，这个门槛不能由偏好开关决定。
+   * 判定与 view 层的批量入口共用 `gateFor()` —— 两边各写一遍的结果
+   * 已经出现过：这里要求手打「确认」才卸应用，应用列表的「批量卸载」
+   * 点一下就执行。阈值只能有一处。
+   *
+   * 风险 3 级不受 `confirmDangerous` 开关影响：卸载应用、清数据、进 EDL
+   * 这类操作没有撤销路径，一次误点就要重刷机，这个门槛不能由偏好开关决定。
    */
-  const needsConfirm = tool.risk >= 2 && (prefs.confirmDangerous || tool.risk >= 3);
-  const needsWord = tool.risk >= 3;
-  const confirmOk = !needsWord || confirmWord.trim() === DANGER_WORD;
+  const gate = gateFor(tool.risk, prefs.confirmDangerous);
+  const needsConfirm = gate.needsConfirm;
+  const needsWord = gate.needsWord;
+  const confirmOk = !needsWord || confirmWord.trim() === CONFIRM_WORD;
 
   const execute = async () => {
     if (running || connecting) return;
@@ -203,14 +203,14 @@ export const ToolCard: FunctionComponent<Props> = ({ tool, expanded, onToggle })
             <div class="confirm">
               <div class="confirm__text">
                 {needsWord
-                  ? `这是高风险操作，执行后可能无法自动回退。请输入「${DANGER_WORD}」以继续。`
+                  ? `这是高风险操作，执行后可能无法自动回退。请输入「${CONFIRM_WORD}」以继续。`
                   : '该操作会改变设备状态，请确认无误后执行。'}
               </div>
               {needsWord && (
                 <input
                   class="input input--mono confirm__input"
                   value={confirmWord}
-                  placeholder={`输入 ${DANGER_WORD}`}
+                  placeholder={`输入 ${CONFIRM_WORD}`}
                   onInput={(event) => setConfirmWord((event.target as HTMLInputElement).value)}
                 />
               )}

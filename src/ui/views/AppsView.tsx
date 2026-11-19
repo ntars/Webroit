@@ -21,12 +21,22 @@ import { useSignal } from '@/ui/state/signal';
 import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
 import { ErrorNotice } from '@/ui/components/ErrorNotice';
+import { reportBatch } from '@/ui/state/actions';
+import { disableApp, disableApps, enableApp, enableApps, stopApp, uninstallApps } from '@/ui/state/mutations';
 
 interface Props {
   tools: Tool[];
 }
 
 type Filter = 'all' | 'third' | 'system' | 'disabled';
+
+/** 完成后的提示词。风险等级与确认文案在 `state/mutations.ts`，这里只管播报 */
+const ACTION_DONE: Record<'enable' | 'disable' | 'forceStop' | 'uninstall', string> = {
+  enable: '已启用',
+  disable: '已冻结',
+  forceStop: '已停止',
+  uninstall: '已卸载',
+};
 
 export const AppsView: FunctionComponent<Props> = ({ tools }) => {
   const current = useSignal(services);
@@ -82,14 +92,24 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
     else setSelected(new Set(filtered.map((entry) => entry.name)));
   };
 
-  /** 执行单个应用的状态变更，完成后局部更新，避免整表重读 */
+  /**
+   * 执行单个应用的状态变更，完成后局部更新，避免整表重读。
+   *
+   * 动作规格与门槛在 `state/mutations.ts`，这里只表达意图。
+   * 上一版是直调服务 —— 于是「卡片要打确认词、列表点一下就走」两套门槛并存。
+   */
   const act = async (name: string, action: 'enable' | 'disable' | 'forceStop') => {
     if (!current || busy) return;
     setBusy(name);
     try {
-      if (action === 'enable') await current.apps.enable(name);
-      else if (action === 'disable') await current.apps.disable(name);
-      else await current.apps.forceStop(name);
+      const outcome =
+        action === 'enable'
+          ? await enableApp(current, name)
+          : action === 'disable'
+            ? await disableApp(current, name)
+            : await stopApp(current, name);
+      // 用户在确认弹层里取消了：什么都不改，也不报成功
+      if (outcome.status === 'cancelled') return;
 
       setEntries((prev) =>
         prev.map((entry) =>
@@ -98,7 +118,7 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
             : entry,
         ),
       );
-      toast('success', `${name} ${action === 'enable' ? '已启用' : action === 'disable' ? '已冻结' : '已停止'}`);
+      toast('success', `${name} ${ACTION_DONE[action]}`);
     } catch (caught) {
       const explained = explainError(caught);
       toast('error', explained.reason);
@@ -113,9 +133,16 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
     const names = [...selected];
     setBusy('batch');
     try {
-      const results = await current.apps.batch(names, action);
-      const ok = results.filter((item) => item.success).length;
-      toast('success', `${names.length} 个应用，成功 ${ok} 个`);
+      const outcome =
+        action === 'enable'
+          ? await enableApps(current, names)
+          : action === 'disable'
+            ? await disableApps(current, names)
+            : await uninstallApps(current, names);
+      if (outcome.status === 'cancelled') return;
+
+      const ok = outcome.value.filter((item) => item.success).length;
+      reportBatch(names.length, ok, ACTION_DONE[action].replace('已', ''));
 
       // 局部同步状态，不重读整表
       setEntries((prev) =>

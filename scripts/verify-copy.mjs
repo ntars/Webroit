@@ -571,6 +571,234 @@ if (boundaryCode) {
     : fail('兜底文案不空洞', vagueInBoundary, '兜底块不得使用零信息短语');
 }
 
+/* ─────────────── F. 变更治理：确认门与审计留底必须同源 ─────────────── */
+
+/*
+ * E 段守的是「渲染炸了用户看到什么」，F 段守的是更常见的一类：
+ * **同一件事从不同入口进来，门槛不一样**。
+ *
+ * 实况（本轮实测）：工具卡片里的「卸载与恢复」是 risk 3，要求手打「确认」，
+ * 执行前后都写审计；而应用列表的「批量卸载」`onClick` 直接调
+ * `apps.batch(names, 'uninstall')` —— 勾两个应用点一下，装的东西就没了，
+ * 既没有确认也没有记录。品牌专区的「停用选中」同样裸调。
+ *
+ * 更糟的是两边都"看起来对"：卡片那套逻辑写得很完整，问题只在另一条路上
+ * 没人复用。所以断言不能是「有没有确认组件」，必须是：
+ *   1. 门槛判定只有一处（`gateFor`），卡片与视图层都调它
+ *   2. 变更动作必须经 `runMutation`（内部串 `askConfirm` + `audited`）
+ *   3. 视图层不得出现直调变更服务方法的写法（反向禁令）
+ *   4. 确认层被挂到外壳，且应急分支也覆盖
+ */
+
+/** 读一份源码并剥注释 —— 反向禁令必须先剥注释，注释里会引用旧写法 */
+const stripComments = (text) =>
+  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+const confirmCode = codeOf('src/ui/state/confirm.ts');
+const actionsCode = codeOf('src/ui/state/actions.ts');
+
+if (!confirmCode || !actionsCode) {
+  fail(
+    '变更治理层',
+    `confirm.ts ${confirmCode ? '有' : '缺'} / actions.ts ${actionsCode ? '有' : '缺'}`,
+    '两个都要',
+    '门槛与留底没有单一入口，各视图只能自己实现一遍',
+  );
+} else {
+  /*
+   * 环 1：门槛判定必须是可复用的纯函数，且 runMutation 真的用它。
+   *
+   * 只断言「存在 gateFor」不够 —— 定义了没人调，两处照旧各写一遍。
+   */
+  const hasGate = /export function gateFor\s*\(/.test(confirmCode);
+  const gateUsed = /gateFor\s*\(/.test(actionsCode);
+
+  // 环 1b：工具卡片也调同一个判定，否则「卡片一套、列表一套」会重新长出来
+  const cardCode = codeOf('src/ui/components/ToolCard.tsx');
+  const cardUsesGate = cardCode ? /gateFor\s*\(/.test(cardCode) : false;
+  // 卡片里不得再出现自己算风险门槛的写法
+  const cardOwnGate = cardCode ? /risk\s*>=\s*2\s*&&/.test(cardCode) : false;
+
+  if (!hasGate) {
+    fail('确认门槛单一判定', 'gateFor 存在', '缺失', '门槛判定散在各处，改阈值必漏一处');
+  } else if (!gateUsed) {
+    fail('确认门槛单一判定', 'runMutation 调 gateFor', '未调用', '定义了判定但不复用，等于没有收敛');
+  } else if (!cardUsesGate || cardOwnGate) {
+    fail(
+      '确认门槛单一判定',
+      cardUsesGate && !cardOwnGate ? '两处同源' : `卡片调 gateFor ${cardUsesGate} / 自带判定 ${cardOwnGate}`,
+      '工具卡片也须走同一判定',
+      '卡片与列表各写一遍 threshold，正是本轮修掉的分裂',
+    );
+  } else {
+    pass('确认门槛单一判定', 'gateFor() 同时被 ToolCard 与 runMutation 使用');
+  }
+
+  /*
+   * 环 2：runMutation 内部必须真的接上两个动作。
+   *
+   * 「有确认组件」不等于「执行前问了」：`askConfirm()` 定义了没人 await，
+   * 弹层永远不会出现。同理 `audited()` 写了没包住 run，等于没记。
+   */
+  const asksBefore = /await askConfirm\s*\(/.test(actionsCode);
+  /*
+   * `audited()` 必须把要执行的那个动作包在里面。
+   *
+   * 判据不能写成 `run()` —— 实际写法是把函数引用当第二个实参传进去
+   * （`audited(meta, run)`）。首版就写成了 `run\s*\(\)`，于是明明包对了也判失败。
+   * 这里改成「audited 调用内部出现了 run」，两种写法都认。
+   */
+  const auditedCall = /audited\s*\(([\s\S]{0,400}?)\)\s*;/.exec(actionsCode);
+  const auditedWrap = Boolean(auditedCall && /\brun\b/.test(auditedCall[1]));
+  const cancelsQuietly = /status:\s*'cancelled'/.test(actionsCode);
+
+  if (!asksBefore || !auditedWrap || !cancelsQuietly) {
+    fail(
+      '变更动作先问后记',
+      `askConfirm ${asksBefore} / audited 包住 run ${auditedWrap} / 取消可区分 ${cancelsQuietly}`,
+      '三项都要',
+      '少了任何一项，批量入口就会退回「点一下直接执行且无记录」',
+    );
+  } else {
+    pass('变更动作先问后记', 'runMutation：askConfirm → audited(run) → 取消可区分');
+  }
+
+  /*
+   * 环 2b：不可逆动作的风险等级不得被填低。
+   *
+   * 这是反向探针逼出来的一条。首版只断言「runMutation 有没有调 gateFor」，
+   * 于是把批量卸载的 `risk: 3` 改成 `risk: 1` 之后，脚本照样全绿 ——
+   * 门槛函数确实被调用了，只是喂进去的数被人改小了，确认弹层根本不会出现。
+   *
+   * 判据放在动作规格表上：凡是名字里带卸载 / 清数据的动作，
+   * 必须写 `risk: 3`。这条会随着新增动作自动生效，不需要维护白名单。
+   */
+  const mutationsCode = codeOf('src/ui/state/mutations.ts') ?? '';
+  const irreversible = [];
+  // 按「action 名 → 后面 400 字符内的 risk 值」逐块取，避免跨动作串味
+  for (const match of mutationsCode.matchAll(/action:\s*'([\w.]+)'([\s\S]{0,400}?)risk:\s*(\d)/g)) {
+    const [, action, , risk] = match;
+    if (/(uninstall|clearData)/.test(action) && Number(risk) < 3) {
+      irreversible.push(`${action} 记为 risk ${risk}`);
+    }
+  }
+  const hasIrreversible = /action:\s*'[\w.]*uninstall/.test(mutationsCode);
+  if (!hasIrreversible) {
+    fail('不可逆动作不分级降级', '规格表含卸载类动作', '未找到', '规格表里连卸载动作都没有，这条断言失去意义');
+  } else if (irreversible.length > 0) {
+    fail(
+      '不可逆动作不分级降级',
+      irreversible.join('、'),
+      '卸载 / 清数据必须 risk 3',
+      '降到 2 级后用户关掉偏好开关就能一键卸载，降到 1 级连问都不问',
+    );
+  } else {
+    pass('不可逆动作不分级降级', '卸载类动作均为 risk 3');
+  }
+}
+
+/*
+ * 环 3：反向禁令 —— 视图层不得直调「会改设备状态」的服务方法。
+/*
+ * 环 3：反向禁令 —— 视图层不得直调「会改设备状态」的服务方法。
+ *
+ * 首版用的是「变更方法白名单」（uninstall / disable / clearData…），
+ * 反向探针立刻把它证伪了：把批量卸载改回 `current.apps.batch(names, 'uninstall')`
+ * **没有被拦住** —— 因为 `batch` 这个动词本身看不出会改状态，它既能冻结也能卸载。
+ *
+ * 白名单法还有个更根本的毛病：服务层以后新增任何变更方法，都得记得回来补一行。
+ * 漏一次就等于放行一条无确认、无审计的路径。
+ *
+ * 所以反过来做：只允许调用一张**只读白名单**，名单外一律算违规。
+ * 新增方法时默认是「不许在视图里直接调」，逼着作者去想该不该走治理层。
+ */
+const READONLY_METHODS = new Set([
+  // 应用：读
+  'listWithState',
+  'listPackages',
+  'paths',
+  'detail',
+  'isSystemPackage',
+  // 设备：读
+  'snapshot',
+  'cpuFreq',
+  'foreground',
+  // 电池：读与采样
+  'summary',
+  'watchPower',
+  'exportCsv',
+  // 品牌：扫描清单（只读）
+  'scan',
+  'readSetting',
+  // 文件：列目录与拉取
+  'list',
+  'pull',
+  // 终端分区：命令要由用户亲手敲，取消 log 走 shell.text 是刻意的
+  'text',
+  'probe',
+  'commandsSince',
+  'commandMark',
+]);
+
+const callRe = /\bcurrent\s*\.\s*(\w+)\s*\.\s*(\w+)\s*\(/g;
+const directCalls = [];
+for (const file of walk(join(ROOT, 'src/ui'), [], /\.tsx?$/)) {
+  const rel = file.replace(ROOT + '/', '');
+  const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
+  lines.forEach((line, index) => {
+    for (const match of line.matchAll(callRe)) {
+      const [, service, method] = match;
+      if (READONLY_METHODS.has(method)) continue;
+      directCalls.push(`${rel}:${index + 1} ${service}.${method}`);
+    }
+  });
+}
+
+directCalls.length === 0
+  ? pass('视图层无直调变更', `${READONLY_METHODS.size} 个只读方法之外一律经 runMutation`)
+  : fail(
+      '视图层绕过治理层',
+      directCalls.length,
+      `${directCalls.join('、')}。这些调用不弹确认、不写审计 —— 批量卸载曾因此点一下就把应用卸了`,
+    );
+
+/*
+ * 环 4：确认层必须挂在外壳，含应急分支。
+ *
+ * 与 C 段同构：应急页 `if (emergency) return <EmergencyReset />` 提前返回，
+ * 尾部挂载走不到。这一页将来接任何变更类入口，没有确认层就是裸的。
+ */
+const confirmSheetRel = 'src/ui/components/ConfirmSheet.tsx';
+const confirmSheetCode = codeOf(confirmSheetRel);
+
+if (!confirmSheetCode) {
+  fail('确认弹层', confirmSheetRel, '缺失', 'askConfirm 没有渲染端，Promise 永不兑现');
+} else if (!/useSignal\s*\(\s*confirmRequest\s*\)/.test(confirmSheetCode)) {
+  fail('确认弹层', '订阅 confirmRequest', '未订阅', '弹层不读信号，请求进来也不会显示');
+} else if (!/settleConfirm\s*\(/.test(confirmSheetCode)) {
+  fail('确认弹层', '能结算请求', '未调用 settleConfirm', '请求永远挂着，调用方 await 卡死');
+} else if (!/word/.test(confirmSheetCode)) {
+  fail('确认弹层', '支持手打确认词', '缺失', '高危操作退化成「点一下确认」');
+} else {
+  const appText = codeOf('src/ui/App.tsx') ?? '';
+  const mounted = appText.includes('<ConfirmSheet');
+  const earlyReturn = /if\s*\(\s*emergency\s*\)\s*\{?\s*return\s*\(?([\s\S]{0,240})/.exec(appText);
+  const covered = earlyReturn ? earlyReturn[1].includes('<ConfirmSheet') : false;
+
+  if (!mounted) {
+    fail('确认层已挂载', 'App.tsx 渲染 ConfirmSheet', '未挂载', '组件写好了但外壳没渲染，弹层不会出现');
+  } else if (!covered) {
+    fail(
+      '确认层已挂载',
+      '应急分支也覆盖',
+      'emergency 分支缺失',
+      '应急页提前 return，尾部挂载走不到；该页接变更操作时会绕过门槛',
+    );
+  } else {
+    pass('确认层已挂载', 'App.tsx 正常分支 + 应急分支均已渲染');
+  }
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

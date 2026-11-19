@@ -38,6 +38,7 @@ import { ToastHost } from '@/ui/components/ToastHost';
 import { SettingsSheet } from '@/ui/components/SettingsSheet';
 import { ProgressStrip } from '@/ui/components/ProgressStrip';
 import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
+import { ConfirmSheet } from '@/ui/components/ConfirmSheet';
 
 /** SVG 图标 */
 function Icon({ path, size = 16 }: { path: string; size?: number }) {
@@ -201,15 +202,17 @@ export const App: FunctionComponent = () => {
    * 应急页完全独立渲染，不套侧边栏与外框 ——
    * 界面被撑大时，任何外层布局都可能把按钮挤出可视区。
    *
-   * 但提示层必须跟着走：这一页自己就有 2 处 toast（重置成功、重置失败），
+   * 但提示层与确认层必须跟着走：这一页自己就有 2 处 toast（重置成功、重置失败），
    * 少挂一个 ToastHost 就等于让「重置到底成没成」再次变成猜谜。
    * 它是 position:fixed 的独立浮层，不参与应急页那套「单列大按钮」布局。
+   * 确认层同理：这一页将来若接入变更类工具，没有它就会绕过门槛。
    */
   if (emergency) {
     return (
       <>
         <EmergencyReset />
         <ToastHost />
+        <ConfirmSheet />
       </>
     );
   }
@@ -411,6 +414,12 @@ export const App: FunctionComponent = () => {
 
       {/* 全局提示层：单例挂在最后，任何分区的执行结果都从这里出声 */}
       <ToastHost />
+
+      {/*
+        确认层：`askConfirm()` 的渲染端，全站只有这一份。
+        视图层不再自己画确认框 —— 各自实现的结果必然是门槛不一致。
+      */}
+      <ConfirmSheet />
 
       {/* 偏好设置：改即生效，无「保存」按钮 */}
       {settings && <SettingsSheet onClose={() => setSettings(false)} />}

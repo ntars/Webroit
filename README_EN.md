@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 87 source files, 18,244 lines (CSS and tests included) |
-| Artifact size | 486 KB across 12 files; first paint roughly 62 KB gzipped |
+| Code size | 92 source files, 18,904 lines (CSS and tests included) |
+| Artifact size | 491 KB across 12 files; first paint roughly 64 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -664,7 +664,7 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 10 files, 187 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`, `/ui/state/progress`, `/ui/routing/route`, `/ui/components/error-boundary-copy`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 11 files, 194 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`, `/ui/state/progress`, `/ui/routing/route`, `/ui/components/error-boundary-copy`, `/ui/state/confirm`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 `src/tools/builtin.test.ts` is a registry snapshot test: now that tool definitions are split across seven files under `src/tools/defs/`, assembly order is decided in one place, `builtin.ts`. Dropping a spread (forgetting `...vendorToolsAll`, say) still type-checks, yet the entire vendor section vanishes. The test pins the numbers 34 / 26 / 24, the per-section distribution, id uniqueness, and the vendor pairing.
 
@@ -1055,13 +1055,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 156.8 KB | 53.6 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.js` | 161.2 KB | 55.5 KB | Required for first paint: Preact, tool registry, all services and views |
 | `index-*.css` | 41.9 KB | 7.5 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
 | Icons total | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 201 KB** | **about 62 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **486 KB** | **—** | 12 files in `dist/` |
+| **First paint total** | **about 206 KB** | **about 64 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **491 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1129,6 +1129,10 @@ Risk grading is the only expression of permissions in the interface; the four le
 | 1 | Reversible | Executes on click; snapshot taken before the change | Log entry written |
 | 2 | Needs confirmation | Dialog (can be disabled in preferences) | Log entry written |
 | 3 | High risk | Dialog plus typing the confirmation word; unaffected by preferences | Log entry written |
+
+**The same action gets the same gate no matter which entry point it comes from.** Risk grading is not applied only on tool cards — freeze / enable / stop / batch-freeze / batch-uninstall in the Apps list, and "disable selected" in the Vendor page, all go through one governance path (`runMutation()` in `src/ui/state/actions.ts`: decide the gate with `gateFor()`, then record through `audited()`).
+
+That constraint was not designed up front — it was found by testing. In an early version the list's "batch uninstall" called the service layer directly, so ticking a few apps and clicking once uninstalled them with no dialog and no record, while the same operation on a tool card was risk 3 and required typing the confirmation word. Now the gate is decided in exactly one place (`gateFor()`), service calls live in exactly one table (`src/ui/state/mutations.ts`), and `verify:copy` scans the view layer for any mutating call outside that table.
 
 **No permission declaration field is implemented.** `available()` is based on real capabilities probed at connection time rather than a static `none` / `shell+` / `root` / `bootloader` label. The reason is that static labels go stale: the same command requires different permissions across ROMs, and a declared label is actively misleading.
 
@@ -1377,7 +1381,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 83 `.ts` / `.tsx` files, 0 places of `any` (ten are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 88 `.ts` / `.tsx` files, 0 places of `any` (eleven are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 
