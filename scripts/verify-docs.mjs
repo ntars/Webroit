@@ -443,6 +443,88 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
   }
 }
 
+// 5d. 偏好设置面板：README 9.2 描述的那个入口必须真的存在且被挂载
+/*
+ * 这条校验的来历：README 9.2 曾写着「设置项在界面右上角的主题按钮旁」，
+ * 而代码里根本没有这个入口 —— 六项偏好字段齐全、消费方也都就绪，
+ * 唯独没有任何界面能改它们。文档描述了一个不存在的能力，比缺功能更糟。
+ *
+ * 所以这里断言的是一条完整的链（与 verify-copy 的提示通路同理）：
+ *   字段存在（storage.ts）→ 面板能改（SettingsSheet 引用六个键）
+ *   → 面板被挂载（App.tsx 渲染它）→ 文档描述与入口一致（说法不再矛盾）
+ * 任一环断开就失败并点名。主题那一条额外要求「改偏好时真的写 data-theme」，
+ * 否则会出现「按钮点了、偏好存了、界面不变」这种最难察觉的残缺。
+ */
+{
+  const panelPath = join(ROOT, 'src/ui/components/SettingsSheet.tsx');
+  const appPath = join(ROOT, 'src/ui/App.tsx');
+  const statePath = join(ROOT, 'src/ui/state/app-state.ts');
+
+  if (!existsSync(panelPath)) {
+    fail('偏好面板组件', '存在', '缺失', 'src/ui/components/SettingsSheet.tsx');
+  } else if (!existsSync(appPath)) {
+    fail('应用外壳', '存在', '缺失', 'src/ui/App.tsx');
+  } else {
+    const panel = readFileSync(panelPath, 'utf8');
+    const app = readFileSync(appPath, 'utf8');
+
+    // 六项用户可改的偏好（lastModule 是导航副产物，不该由用户手改）
+    const fields = [
+      'theme',
+      'terminalFontSize',
+      'showCommandEcho',
+      'confirmDangerous',
+      'batteryWarning',
+      'sidebarCollapsed',
+    ];
+    const missing = fields.filter((f) => !new RegExp(`\\b${f}\\b`).test(panel));
+    if (missing.length === 0) pass('偏好面板覆盖字段', `${fields.length} 项`);
+    else fail('偏好面板覆盖字段', `缺 ${missing.join('、')}`, fields.length, 'SettingsSheet 未引用这些键');
+
+    const mounted = /import\s*{[^}]*SettingsSheet[^}]*}\s*from/.test(app) && /<SettingsSheet\b/.test(app);
+    const hasEntry = /title="偏好设置"/.test(app);
+    if (mounted && hasEntry) pass('偏好面板已挂载', 'App.tsx 含入口与渲染');
+    else {
+      fail(
+        '偏好面板已挂载',
+        `渲染 ${mounted} / 入口 ${hasEntry}`,
+        '两者都要有',
+        '缺任一项则用户找不到或打不开面板',
+      );
+    }
+
+    // 主题必须真正落到 DOM：updatePreferences 里要调用 applyTheme
+    const state = existsSync(statePath) ? readFileSync(statePath, 'utf8') : '';
+    const themeApplied = /function updatePreferences[\s\S]{0,400}applyTheme\(/.test(state);
+    if (themeApplied) pass('主题写入 DOM', 'updatePreferences 调 applyTheme');
+    else {
+      fail(
+        '主题写入 DOM',
+        '未调用 applyTheme',
+        '须在 updatePreferences 内调用',
+        '只存偏好不写 data-theme，按钮点了界面不会变',
+      );
+    }
+
+    /*
+     * 文档口径。要求点：
+     * 1. 不得再出现「设置项在界面右上角的主题按钮旁」—— 入口是齿轮按钮，
+     *    描述成「主题按钮旁」会让用户对着主题按钮找设置。
+     * 2. 必须点名齿轮（或 gear）这个实际入口形态。
+     */
+    const stale = /设置项在界面右上角的主题按钮旁/.test(readme);
+    const namesGear = /齿轮/.test(readme);
+    const enGear = /gear/i.test(readmeEn);
+    if (stale) {
+      fail('README 9.2 入口描述', '已更新', '仍是旧说法', '设置项在界面右上角的主题按钮旁');
+    } else if (!namesGear || !enGear) {
+      fail('README 9.2 入口描述', '点名齿轮', `中文 ${namesGear} / 英文 ${enGear}`, '入口形态须与实现一致');
+    } else {
+      pass('README 9.2 入口描述', '中英文均点名齿轮按钮');
+    }
+  }
+}
+
 // 6. 中英文档章节数一致
 if (readmeEn) {
   const count = (text, re) => (text.match(re) ?? []).length;

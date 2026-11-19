@@ -34,6 +34,7 @@ import { ConnectPanel } from '@/ui/views/ConnectPanel';
 import { EmergencyReset } from '@/ui/views/EmergencyReset';
 import { BrandBadge } from '@/ui/components/BrandBadge';
 import { ToastHost } from '@/ui/components/ToastHost';
+import { SettingsSheet } from '@/ui/components/SettingsSheet';
 
 /** 应急入口的 hash 标记 */
 const EMERGENCY_HASH = '#/reset-display';
@@ -146,6 +147,7 @@ export const App: FunctionComponent = () => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [emergency, setEmergency] = useState(isEmergencyRoute);
   const [guide, setGuide] = useState(false);
+  const [settings, setSettings] = useState(false);
   const { connect, busy: connecting, message: connectMessage, supported } = useConnect();
 
   // hash 变化要能切换页面 —— 用户在应急页点「返回主界面」时靠这个回到正常界面
@@ -320,6 +322,18 @@ export const App: FunctionComponent = () => {
             <InstallButton />
             <button
               type="button"
+              class="btn btn--ghost btn--sm titlebar__settings"
+              onClick={() => setSettings(true)}
+              title="偏好设置"
+              aria-label="偏好设置"
+              aria-expanded={settings}
+            >
+              <Icon
+                path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
+              />
+            </button>
+            <button
+              type="button"
               class="btn btn--ghost btn--sm"
               onClick={() => updatePreferences({ theme: prefs.theme === 'dark' ? 'light' : 'dark' })}
               title="切换明暗主题"
@@ -379,6 +393,9 @@ export const App: FunctionComponent = () => {
 
       {/* 全局提示层：单例挂在最后，任何分区的执行结果都从这里出声 */}
       <ToastHost />
+
+      {/* 偏好设置：改即生效，无「保存」按钮 */}
+      {settings && <SettingsSheet onClose={() => setSettings(false)} />}
 
       {/* 连接步骤：从提示条按需打开，不占用主浏览路径 */}
       {guide && (

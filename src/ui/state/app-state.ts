@@ -7,10 +7,11 @@
 
 import type { DeviceSession } from '@/core/session/device-session';
 import type { Services } from '@/services/index';
-import { type Preferences, loadPreferences, savePreferences } from '@/core/storage';
+import { type Preferences, loadPreferences, resetPreferences, savePreferences } from '@/core/storage';
 import type { ModuleId } from '@/tools/registry';
 import type { OutputChannel } from '@/core/shell';
 import { signal } from '@/ui/state/signal';
+import { applyTheme } from '@/ui/theme/apply';
 
 /** 连接阶段 */
 export type ConnectionPhase =
@@ -119,9 +120,17 @@ export function setProgress(next: ProgressState | null): void {
   progress.set(next);
 }
 
-/** 更新偏好并落盘 */
+/**
+ * 更新偏好并落盘。
+ *
+ * 主题在这里落 DOM：偏好只是「记住用户选了深色」，真正让界面变的是
+ * `data-theme` 属性。上一版两条路分开走，结果按钮点了没反应 ——
+ * 现在统一从这一个出口出去，任何调用点都不可能只改一半。
+ */
 export function updatePreferences(patch: Partial<Preferences>): void {
-  preferences.set(savePreferences(patch));
+  const next = savePreferences(patch);
+  preferences.set(next);
+  if (patch.theme) applyTheme(next.theme);
 }
 
 /** 切换分区 */
@@ -129,6 +138,22 @@ export function switchModule(id: ModuleId): void {
   activeModule.set(id);
   updatePreferences({ lastModule: id });
   sidebarOpen.set(false);
+}
+
+/**
+ * 恢复默认偏好。
+ *
+ * 只重置偏好，不碰设备快照与审计记录 —— 那两类是「发生过的事实」，
+ * 不该因为一次「把界面调回原样」而消失。真要清干净见 README 9.3。
+ *
+ * 主题也必须跟着回落，否则用户点了「恢复默认」看到界面还是深色，
+ * 会以为按钮没生效。
+ */
+export function resetAllPreferences(): void {
+  const next = resetPreferences();
+  preferences.set(next);
+  applyTheme(next.theme);
+  toast('success', '偏好已恢复默认');
 }
 
 /** 重置连接状态 */

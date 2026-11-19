@@ -10,7 +10,7 @@
 
 import { render } from 'preact';
 
-import { resolveTheme, loadPreferences } from '@/core/storage';
+import { loadPreferences } from '@/core/storage';
 import { App } from '@/ui/App';
 import { registerTools, type ModuleId } from '@/tools/registry';
 import { BUILTIN_TOOLS, bindFileSink, bindServices } from '@/tools/builtin';
@@ -19,6 +19,7 @@ import { auditLog } from '@/core/audit';
 import { bindSnapshotBackend, snapshots } from '@/core/snapshot';
 import { installIndexedDbBackend } from '@/core/snapshot-indexeddb';
 import { registerServiceWorker, watchInstallPrompt } from '@/core/pwa';
+import { applyTheme, watchSystemTheme } from '@/ui/theme/apply';
 
 import '@/ui/theme/tokens.css';
 import '@/ui/theme/base.css';
@@ -26,19 +27,15 @@ import '@/ui/theme/components.css';
 import '@/ui/theme/layout.css';
 import '@/ui/theme/views.css';
 
-/** 应用主题到根元素 */
-function applyTheme(): void {
-  const prefs = loadPreferences();
-  const resolved = resolveTheme(prefs.theme);
-  document.documentElement.dataset.theme = resolved;
-
-  // auto 模式需要跟随系统切换，否则用户在系统里改暗色后本页不变
-  if (prefs.theme === 'auto' && typeof matchMedia !== 'undefined') {
-    const query = matchMedia('(prefers-color-scheme: light)');
-    query.addEventListener('change', () => {
-      document.documentElement.dataset.theme = resolveTheme('auto');
-    });
-  }
+/**
+ * 应用主题到根元素。
+ *
+ * 实际写入在 `ui/theme/apply.ts` —— 首屏与设置面板走同一条路，
+ * 免得「启动时对、点按钮不对」这类分裂再次出现。
+ */
+function bootTheme(): void {
+  applyTheme(loadPreferences().theme);
+  watchSystemTheme();
 }
 
 /**
@@ -59,7 +56,7 @@ function registerBrowserFileSink(): void {
 }
 
 function bootstrap(): void {
-  applyTheme();
+  bootTheme();
 
   // 注册内置工具，一次即可
   registerTools(BUILTIN_TOOLS);

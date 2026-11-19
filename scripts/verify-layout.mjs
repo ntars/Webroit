@@ -368,6 +368,20 @@ const closeGuide = `(() => {
   return false;
 })()`;
 
+/** 打开「偏好设置」弹层 —— 六项偏好都藏在这里，漏测等于漏掉整个面板 */
+const openSettings = `(() => {
+  const btn = document.querySelector('.titlebar__settings');
+  if (!btn) return false;
+  btn.click();
+  return true;
+})()`;
+
+const closeSettings = `(() => {
+  const sheet = document.querySelector('.settings-sheet .settings-head .btn');
+  if (sheet) { sheet.click(); return true; }
+  return false;
+})()`;
+
 /** 切换侧边栏抽屉（窄屏唯一的分区入口，必须单独走查） */
 const toggleSidebar = `(() => {
   const btn = document.querySelector('.titlebar__menu');
@@ -471,6 +485,17 @@ try {
         await new Promise((r) => setTimeout(r, 320));
         await measure('guide', '弹层', '.guide-sheet');
         await evaluate(closeGuide);
+        await new Promise((r) => setTimeout(r, 160));
+      }
+
+      /*
+       * 偏好设置弹层：与连接步骤同理，只量面板内部。
+       * 这是唯一能从顶栏进入的弹层，此前从未被任何脚本测量过。
+       */
+      if (await evaluate(openSettings)) {
+        await new Promise((r) => setTimeout(r, 320));
+        await measure('settings', '弹层', '.settings-sheet');
+        await evaluate(closeSettings);
         await new Promise((r) => setTimeout(r, 160));
       }
 

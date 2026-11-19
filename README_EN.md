@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 77 source files, 16,661 lines (CSS and tests included) |
-| Artifact size | 471 KB across 12 files; first paint roughly 59 KB gzipped |
+| Code size | 79 source files, 17,166 lines (CSS and tests included) |
+| Artifact size | 479 KB across 12 files; first paint roughly 61 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -677,11 +677,11 @@ npm run verify:layout   # overflow and touch targets at 375 / 768 / 1024 / 1440 
 npm run verify:copy     # do all four failure modes give a cause and a next step
 ```
 
-`verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
+`verify:docs` checks every fact that can be recomputed from the repository: source file and line counts, artifact file count and size, per-chunk gzip sizes, tool counts (the 26 / 24 / 34 trio), brand count, the distribution of `any`, unit-test file and case counts, the Service Worker precache manifest, the contrast pair matrix, the Preferences panel chain (fields → mounted → theme written to the DOM → documented wording), and whether the Chinese and English docs have matching section counts. It runs in CI as a post-build step and fails the deploy on any mismatch.
 
 `verify:theme` launches headless Chrome and reads real computed styles to check the chroma of every non-semantic token (confirming no hue crept in), the accent direction (must be light in dark mode, dark in light mode), and a full foreground × background contrast matrix (80 pairs, including the terminal palette, accent-on-fill inversion, control border and switch at the 3:1 threshold). Passing `-- --markdown` also prints two ready-to-paste measurement tables generated from the same run, so recolouring means re-running the script rather than transcribing by hand. It is not wired into CI — it needs a Chrome environment, so it is better suited as a local self-check after touching colours.
 
-`verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × five states (collapsed, expanded, modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
+`verify:layout` also launches headless Chrome, but measures geometry: four widths × every module × six states (collapsed, expanded, connection-steps modal, preferences modal, drawer), checking horizontal overflow, elements past the viewport, content clipped by `overflow-x:hidden`, and elements whose centre point is covered by another layer. On narrow widths it checks two more things: whether tap targets reach 44px, and whether the drawer can be dismissed by tapping the scrim and by pressing Esc. The overflow baseline is the nearest clipping ancestor's right edge rather than the viewport — once the sidebar takes 236px on the left, comparing against the viewport misses the slice that has already been clipped. It runs in CI, as a post-build step like `verify:docs`.
 
 `verify:copy` guards one rule: every failure message must be useful. One part of it executes `src/core/error-copy.ts` for real and asserts, over 17 authentic strings across four modes (not connected / empty result / command failed / device disconnected), that a cause is present, the next step is an action, no filler phrase like "operation failed" or "unknown error" appears, and the raw device text is retained. The other half scans the source for two ways of bypassing the translation layer: dumping an exception straight into `<p>{error}</p>`, and hand-writing `instanceof Error ? x.message : String(x)` in a dozen places. The latter is harmless on its own, but scattered everywhere it means nobody owns the "turn this into a next step" part. A third part guards whether the messages can reach the screen at all: it counts every `toast(` call site, then confirms that a component subscribes to the `toasts` signal, that `App.tsx` actually renders it, and that the emergency-reset early-`return` branch carries it too — a message with no renderer is a message that was never written. No browser needed; it runs in CI.
 
@@ -829,7 +829,7 @@ Audit and snapshots use two separate databases rather than two stores in one: th
 
 ### 9.2 Adjustable Parameters
 
-Settings live next to the theme button in the top-right corner; the rest are constants in code.
+The **gear button** in the top-right corner of the title bar opens the Preferences panel. Six preferences take effect and persist immediately — there is no Save button, because each one is visible the moment it changes (font size, theme, sidebar width), and an extra confirmation step only makes people doubt whether it stuck. The rest are constants in code.
 
 | Item | Default | Range | Notes |
 |---|---|---|---|
@@ -844,6 +844,8 @@ Settings live next to the theme button in the top-right corner; the rest are con
 The following are code constants with no UI toggle: command ring buffer 200 entries (used by the audit to slice windows by sequence number), terminal display cap 2000 lines (`pushOutput` drops the oldest beyond it), audit record cap 500 entries, and command timeouts which must be passed explicitly at each call site (no call site currently sets one, relying on the ADB layer's own connection timeout).
 
 ### 9.3 Reset
+
+"Restore defaults" at the bottom of the Preferences panel clears only the six preferences and puts the theme back to "follow system". It does **not** touch settings snapshots, audit records, or the ADB key — those are records of what actually happened, and should not vanish because someone put the interface back the way it was.
 
 There is no "clear all data" button in the interface. For a complete reset, delete the `webroit`, `webroit-snapshots`, and `Tango` databases in the Application panel of the browser developer tools, along with the `webroit:preferences` key in localStorage. Afterwards you must re-authorise the device and reconfigure preferences.
 
@@ -1050,13 +1052,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 147.1 KB | 51.0 KB | Required for first paint: Preact, tool registry, all services and views |
-| `index-*.css` | 36.7 KB | 6.8 KB | Five stylesheets merged |
+| `index-*.js` | 152.1 KB | 52.4 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.css` | 40.1 KB | 7.2 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
 | Icons total | 202.7 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 186 KB** | **about 59 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **471 KB** | **—** | 12 files in `dist/` |
+| **First paint total** | **about 194 KB** | **about 61 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **479 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1372,7 +1374,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 73 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 75 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 

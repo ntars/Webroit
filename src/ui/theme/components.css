@@ -536,30 +536,187 @@ textarea.input {
   }
 }
 
-/* ─────────────── 窄屏触控尺寸 ─────────────── */
+/* ─────────────── 偏好设置面板 ─────────────── */
 
 /*
- * 桌面端 26 / 32px 高的按钮是 macOS 的常规尺寸，鼠标点得准，界面也紧致。
- * 但 768px 以下的宽度已经进入手指操作的领地：命中区域小于 44px 时，
- * 拇指会稳定地点到相邻控件上 —— 在「卸载应用」这种不可逆操作旁边尤其危险。
- *
- * 所以只在窄屏把可点区域补到 44px，并且只补 min-height：
- * 桌面的视觉密度一点不动，小屏也不用另做一套组件。
- *
- * 输入框不在此列：它靠聚焦后弹出键盘操作，与按钮的误触风险不同，
- * 硬拉到 44px 只会让表单在手机上变得稀稀拉拉。
- * 下拉选择（select）要算进来 —— 它是「点开、挑一项」，属于点选而非键入。
+ * 与「连接步骤」弹层同一套形态（遮罩 + 居中卡片），但因为内容是短表单，
+ * 宽度收到 520px，避免在 1440px 屏上拉成一条稀薄的横条。
  */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--scrim);
+}
+
+.settings-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - var(--space-10));
+  border-radius: var(--radius-lg);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.settings-head__title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-4);
+}
+
+/*
+ * 一行设置用「文字块 + 控件块」两列，控件列固定宽并右对齐。
+ * 控件列不定宽的话，主题三档与开关会各占不同宽度，
+ * 六个开关徽标的右边缘参差，扫读时视线被反复拉走。
+ */
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.setting:last-child {
+  border-bottom: none;
+}
+
+.setting__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting__label {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+.setting__hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: var(--leading-normal);
+}
+
+.setting__control {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.setting__stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 数值输入只放得下三四位数字，撑满列宽会显得空 */
+.setting__number {
+  width: 68px;
+  text-align: center;
+}
+
+.setting__unit {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+  flex-shrink: 0;
+}
+
+.settings-foot__note {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: var(--leading-normal);
+}
+
+/* ─────────────── 窄屏触控尺寸 ─────────────── */
 @media (max-width: 768px) {
   .btn,
   .btn--sm,
   .btn--lg,
   .segmented__item,
   .nav-item,
-  .switch,
   .select,
   .select--compact {
     min-height: 44px;
+  }
+
+  /*
+   * 开关不能简单加 min-height。
+   *
+   * 它是 38×22 的胶囊，圆角是 --radius-full —— 只把高度拉到 44 会让它
+   * 变成一颗 38×44 的圆球，用户看到的是一个单选圆点，认不出这是开关（375px 实测）。
+   *
+   * 所以改成「命中区 44×44、轨道仍 38×22」：按钮本体透明，
+   * 轨道交给 ::before 画，滑块 ::after 居中在轨道内。
+   * 视觉尺寸一点没变，手指的命中区补足了 12px 的上下余量。
+   */
+  .switch,
+  .switch[data-on='true'] {
+    width: 44px;
+    height: 44px;
+    /*
+     * 必须连 `[data-on='true']` 一起写成透明：那条规则的特异性比单一类名高，
+     * 只写 `.switch { background: transparent }` 会被它盖回强调色，
+     * 结果是「白底圆球 + 灰滑块」—— 打开态看着像个单选圆点。
+     */
+    background: transparent;
+  }
+
+  .switch::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 11px;
+    width: 38px;
+    height: 22px;
+    border-radius: var(--radius-full);
+    background: var(--switch-track-off);
+    transition: background var(--duration-normal) var(--ease-out);
+  }
+
+  .switch[data-on='true']::before {
+    background: var(--accent);
+  }
+
+  .switch::after {
+    left: 5px;
+    top: 13px;
   }
 
   /* 分段控件是整块胶囊，个体拉高会把容器撑成两层，同步补内边距即可 */
@@ -581,5 +738,32 @@ textarea.input {
     width: 44px;
     height: 44px;
     margin: -12px -10px -12px 0;
+  }
+
+  /*
+   * 设置项在窄屏改成上下两段。
+   *
+   * 375px 下减掉遮罩内边距与卡片内边距只剩约 303px，左边一段说明文字
+   * 加上右边的三个主题按钮就挤不下了 —— 说明会被压成三四行，
+   * 而用户的眼神正在两个控件之间来回跳。上下排开各占满宽，谁都读得清。
+   */
+  .setting {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .setting__control {
+    justify-content: flex-start;
+  }
+
+  /* 设置卡在窄屏去掉多余留白，把高度留给内容 */
+  .settings-overlay {
+    padding: var(--space-2);
+  }
+
+  .settings-foot {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
