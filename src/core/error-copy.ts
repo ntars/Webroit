@@ -159,7 +159,12 @@ const RULES: Rule[] = [
   },
   {
     kind: 'disconnected',
-    test: /设备已断开|disconnected|error: closed|broken pipe|transfer error|no connection/i,
+    /*
+     * 「设备连接已结束」是 `resetConnection()` 中止在途命令时用的原因原文。
+     * 它必须落在「连接中断」这一档，不能落进上面的「已取消」：
+     * 用户没有点中止，是线掉了 —— 出口是去查数据线，不是「重新执行一次即可」。
+     */
+    test: /设备已断开|设备连接已结束|连接已中断|disconnected|error: closed|broken pipe|transfer error|no connection/i,
     build: () => ({
       reason: '与设备的连接中断了。',
       next: '重新插拔数据线，等手机回到桌面后点「重新连接」。中断时正在进行的操作可能只完成了一半，请复查结果。',

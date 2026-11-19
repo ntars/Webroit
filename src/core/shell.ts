@@ -13,7 +13,7 @@
  */
 
 import type { DeviceDriver, ShellResult } from '@/core/transport/types';
-import { assertCommandSuccess, checkAbort } from '@/core/utils';
+import { assertCommandSuccess, checkAbort, raceAbort } from '@/core/utils';
 
 /** 命令输出流类型 */
 export type OutputChannel = 'command' | 'result' | 'stderr' | 'info';
@@ -206,21 +206,41 @@ export class ShellContext {
     let streamedErr = false;
 
     try {
-      const result = await this.driver.exec(command, {
-        signal: finalSignal,
-        onStdout: log
-          ? (text) => {
-              streamedOut = true;
-              this.#output('result', text);
-            }
-          : undefined,
-        onStderr: log
-          ? (text) => {
-              streamedErr = true;
-              this.#output('stderr', text);
-            }
-          : undefined,
-      });
+      /*
+       * 这里必须 race 一次取消信号，不能直接 await。
+       *
+       * 把 signal 透传给驱动是必要的，但不充分：数据线被拔掉之后，
+       * 底层 `spawn()` 返回的 Promise 可能既不 resolve 也不 reject ——
+       * 谁来兑现它？没有谁。于是 `await` 会一直挂着，直到 USB 传输超时
+       * （按秒计，实测能到两分钟）。
+       *
+       * 这一层是唯一的收口点：services 层的 76 处命令调用全部经过 `shell()`，
+       * 在这里 race 一次，等于一次性覆盖所有调用点。上一轮（T-017）只把批量
+       * 循环外面包了 `raceAbort`，单条冻结 / 启用、显示调节、文件传输这些
+       * 走的还是裸 await —— 同一个洞，只是少有人撞上。
+       *
+       * race 输掉的那一侧不会真正取消底层命令（做不到），但调用方拿回了
+       * 控制权，不会卡死在一次已经没有意义的等待上；底层残留的 Promise 由
+       * 驱动自己的断线清理收尾（`raceAbort` 内部已挂 catch 防 unhandled）。
+       */
+      const result = await raceAbort(
+        this.driver.exec(command, {
+          signal: finalSignal,
+          onStdout: log
+            ? (text) => {
+                streamedOut = true;
+                this.#output('result', text);
+              }
+            : undefined,
+          onStderr: log
+            ? (text) => {
+                streamedErr = true;
+                this.#output('stderr', text);
+              }
+            : undefined,
+        }),
+        finalSignal,
+      );
 
       if (log) {
         if (result.stdout && !streamedOut) this.#output('result', result.stdout.trimEnd());

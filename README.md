@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 94 个源文件、19,476 行（含 CSS 与测试） |
-| 产物规模 | 494 KB / 12 个文件，首屏 gzip 约 64 KB |
+| 代码规模 | 95 个源文件、19,693 行（含 CSS 与测试） |
+| 产物规模 | 494 KB / 12 个文件，首屏 gzip 约 65 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -668,7 +668,7 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 12 个文件、212 个用例，全部落在不碰 DOM 的纯函数层（另有确认门槛的 7 个用例在 `/ui/state/confirm`、批量播报的 18 个用例在 `/ui/state/batch-report`）（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`、`/ui/components/error-boundary-copy`、`/ui/state/confirm`、`/ui/state/batch-report`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 13 个文件、224 个用例，全部落在不碰 DOM 的纯函数层（另有确认门槛的 7 个用例在 `/ui/state/confirm`、批量播报的 18 个用例在 `/ui/state/batch-report`）（`/core/utils`、`/core/shell`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`、`/ui/components/error-boundary-copy`、`/ui/state/confirm`、`/ui/state/batch-report`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 其中 `src/tools/builtin.test.ts` 是注册表快照测试：工具定义按分区拆到 `src/tools/defs/` 下七个文件后，拼装顺序只由 `builtin.ts` 一处决定，漏掉一行展开符号（比如忘了 `...vendorToolsAll`）typecheck 照样通过，但品牌专区分区会整块消失。该测试锁住 34 / 26 / 24 三个数字、分区分布、id 唯一性与品牌配对。
 
@@ -692,7 +692,7 @@ npm run verify:cancel   # 断线中止：批量跑到一半拔线，是否立刻
 
 `verify:layout` 同样起无头 Chrome，但量的是几何：四档宽度 × 全部分区 × 折叠 / 展开 / 连接步骤弹层 / 偏好设置弹层 / 抽屉六种状态，逐一检查横向溢出、元素越界、被 `overflow-x:hidden` 裁掉、以及中心点被别的图层挡住。窄屏下另查两件事：可点区域是否 ≥ 44px，抽屉展开后点遮罩和按 Esc 能否关掉。越界判定基准取「最近裁剪祖先的右边缘」而不是视口 —— 侧边栏占掉左侧 236px 之后，按视口比会漏掉已经被裁掉的那截。它已进 CI，和 `verify:docs` 一样是构建后的一步。
 
-`verify:copy` 守的是「每句失败提示都得有用」，外加「这些提示真的出得来」。它分七段：一段把 `src/core/error-copy.ts` 真跑一遍，对「未连接设备 / 无工具结果 / 命令失败 / 设备断开」四类共 17 条真实原文逐条断言——原因非空、下一步是可执行动作、不出现「操作失败」「未知错误」这类零信息短语、原始报错必须保留；另一半静态扫源码，抓两种绕过翻译层的写法：把异常直接塞进 `<p>{error}</p>`，以及各处自己写 `instanceof Error ? x.message : String(x)`。后者本身无害，但散落十几处就意味着没人负责「翻译成下一步」这一步。第三段守的是反馈通路：数出全部 `toast(` 调用点，再确认存在订阅 `toasts` 信号的组件、该组件确实被 `App.tsx` 渲染，且应急重置页那条提前 `return` 的分支也挂上了它 —— 文案写得再清楚，没有渲染层就等于没写。第四段守的是传输进度通路，结构与第三段同构：数出 `reportProgress(` 与 `progressSink` 的真实调用点，确认存在用 `useSignal(progress)` 订阅的组件、该组件被 `App.tsx` 渲染，并额外断言「逐块进度不得再写进终端文本」—— 传输时每 64 KB 回调一次，100 MB 的包约 1600 次，`pushOutput` 的 80 ms 合并窗口会把它们拼进同一个 DOM 节点，宽度撑到几万像素。第五段守的是更前面一步 —— **渲染本身就炸了的时候用户看到什么**：Preact 在渲染期抛错会一路向上抛，找不到边界就把整棵子树从 DOM 卸掉，实测某个分区算错一个字段，切进去后主区域只剩一张连接提示条、切到别的分区也不恢复。所以这一段断言四环：错误边界组件实现双钩子（`getDerivedStateFromError` + `componentDidCatch`）且带重试与复位键、分区渲染确实包在里面、外壳渲染 `<App />` 时也有边界、`unhandledrejection` 与 `error` 两个全局事件都听得见；外加一条反向禁令：兜底块不得使用「出错了」这类零信息短语 —— 界面已经坏掉时，用户唯一能看到的就是这几行字。不需要浏览器，已进 CI。第六段守的是「同一件事从哪个入口进来，门槛都一样」：`gateFor()` 是唯一的门槛判定、`runMutation()` 内部必须真的 `await askConfirm()` 并用 `audited()` 包住执行、动作规格表里凡是名字带 uninstall / clearData 的动作必须记为 risk 3，同时用一张**只读方法白名单**反向扫描视图层 —— 名单外的一切服务调用都算绕过治理层。用白名单而不是禁用词表，是因为新增一个变更方法时「默认不许在视图里直接调」，漏一次就等于放行一条无确认无审计的路径。第七段守的是「问完之后结果说不说得清」：批量操作的部分失败曾经只报「成功 3 个、失败 2 个」并附一句「逐条原因见下方记录」，而下方没有任何记录 —— 失败原因躺在 `BatchResult.message` 里，视图层数完成功个数就把它扔了。所以这一段断言播报由 `buildBatchReport()` 从结果数组算出（摘要进提示条、明细逐条进终端），并反向检查每个 `reportBatch()` 调用点都没有拿 `.length` 当播报依据；另加一条形状禁令：出现「见下方」时必须紧跟一个「」包起来的真实区域名，否则就是在把用户指去一个不存在的地方。不需要浏览器，已进 CI。第八段守的是「说清结果之前，那批操作得先停下来」：拔线时 `batch()` 的 for 循环曾经没有任何中断判据 —— 正在跑的那条会失败，catch 记成一条失败，然后循环毫不犹豫开始下一条，后面 7 条命令一条条发往已经死掉的 USB 链路，每条都等到超时。这一段断言四环：连接收尾时真的调了 `abort()`（且必须在清空 `services` **之前**，否则那个 ShellContext 再没人能触发）、批量循环里有 `aborted` 判据、正在执行的那条调用被 `raceAbort()` 包过（数据线都拔了，谁来兑现底层 spawn 的 Promise）、剩余项标 `skipped` 且播报层真的按它筛而不是往「失败」里塞。不需要浏览器，已进 CI。
+`verify:copy` 守的是「每句失败提示都得有用」，外加「这些提示真的出得来」。它分八段：一段把 `src/core/error-copy.ts` 真跑一遍，对「未连接设备 / 无工具结果 / 命令失败 / 设备断开」四类共 17 条真实原文逐条断言——原因非空、下一步是可执行动作、不出现「操作失败」「未知错误」这类零信息短语、原始报错必须保留；另一半静态扫源码，抓两种绕过翻译层的写法：把异常直接塞进 `<p>{error}</p>`，以及各处自己写 `instanceof Error ? x.message : String(x)`。后者本身无害，但散落十几处就意味着没人负责「翻译成下一步」这一步。第三段守的是反馈通路：数出全部 `toast(` 调用点，再确认存在订阅 `toasts` 信号的组件、该组件确实被 `App.tsx` 渲染，且应急重置页那条提前 `return` 的分支也挂上了它 —— 文案写得再清楚，没有渲染层就等于没写。第四段守的是传输进度通路，结构与第三段同构：数出 `reportProgress(` 与 `progressSink` 的真实调用点，确认存在用 `useSignal(progress)` 订阅的组件、该组件被 `App.tsx` 渲染，并额外断言「逐块进度不得再写进终端文本」—— 传输时每 64 KB 回调一次，100 MB 的包约 1600 次，`pushOutput` 的 80 ms 合并窗口会把它们拼进同一个 DOM 节点，宽度撑到几万像素。第五段守的是更前面一步 —— **渲染本身就炸了的时候用户看到什么**：Preact 在渲染期抛错会一路向上抛，找不到边界就把整棵子树从 DOM 卸掉，实测某个分区算错一个字段，切进去后主区域只剩一张连接提示条、切到别的分区也不恢复。所以这一段断言四环：错误边界组件实现双钩子（`getDerivedStateFromError` + `componentDidCatch`）且带重试与复位键、分区渲染确实包在里面、外壳渲染 `<App />` 时也有边界、`unhandledrejection` 与 `error` 两个全局事件都听得见；外加一条反向禁令：兜底块不得使用「出错了」这类零信息短语 —— 界面已经坏掉时，用户唯一能看到的就是这几行字。不需要浏览器，已进 CI。第六段守的是「同一件事从哪个入口进来，门槛都一样」：`gateFor()` 是唯一的门槛判定、`runMutation()` 内部必须真的 `await askConfirm()` 并用 `audited()` 包住执行、动作规格表里凡是名字带 uninstall / clearData 的动作必须记为 risk 3，同时用一张**只读方法白名单**反向扫描视图层 —— 名单外的一切服务调用都算绕过治理层。用白名单而不是禁用词表，是因为新增一个变更方法时「默认不许在视图里直接调」，漏一次就等于放行一条无确认无审计的路径。第七段守的是「问完之后结果说不说得清」：批量操作的部分失败曾经只报「成功 3 个、失败 2 个」并附一句「逐条原因见下方记录」，而下方没有任何记录 —— 失败原因躺在 `BatchResult.message` 里，视图层数完成功个数就把它扔了。所以这一段断言播报由 `buildBatchReport()` 从结果数组算出（摘要进提示条、明细逐条进终端），并反向检查每个 `reportBatch()` 调用点都没有拿 `.length` 当播报依据；另加一条形状禁令：出现「见下方」时必须紧跟一个「」包起来的真实区域名，否则就是在把用户指去一个不存在的地方。不需要浏览器，已进 CI。第八段守的是「说清结果之前，那批操作得先停下来」：拔线时 `batch()` 的 for 循环曾经没有任何中断判据 —— 正在跑的那条会失败，catch 记成一条失败，然后循环毫不犹豫开始下一条，后面 7 条命令一条条发往已经死掉的 USB 链路，每条都等到超时。这一段断言五环：连接收尾时真的调了 `abort()`（且必须在清空 `services` **之前**，否则那个 ShellContext 再没人能触发）、批量循环里有 `aborted` 判据、正在执行的那条调用被 `raceAbort()` 包过（数据线都拔了，谁来兑现底层 spawn 的 Promise）、**`shell()` 自身也把信号 race 上**（这一处收口覆盖 services 层全部 76 处命令调用，单条冻结、改分辨率、传文件都靠它，光守住两条批量路径不够）、剩余项标 `skipped` 且播报层真的按它筛而不是往「失败」里塞。第四环还会反向禁止「raceAbort 调了但信号传空」这种形状对、行为不对的写法。不需要浏览器，已进 CI。
 
 ### 7.3b 命令行与 MCP Server
 
@@ -1145,6 +1145,8 @@ grep -rhoE "https?://[a-zA-Z0-9._/-]+" dist/ | sort -u          # 仅剩 5 条�
 
 **拔线要让正在做的活立刻停手**。批量操作是「一轮 for 循环里逐条 await」，每条命令自己会响应取消信号，但**循环本身不会**：前一条失败被 catch 之后，它会毫不犹豫地开始下一条。实测拔线时后面的命令一条条发往已经死掉的 USB 链路，每条都要等到超时才返回，用户看到「拔线后界面还在转两分钟」。所以 `resetConnection()` 里先 `abort()` 再清 `services`（顺序不能反 —— 一旦置空，那个 `ShellContext` 就再没人能触发），`batch()` 每条之前查 `aborted`，正在执行的那条用 `raceAbort()` 包住 —— 数据线都拔了，谁来兑现底层 `spawn()` 的 Promise？靠信号抢回控制权是唯一办法。剩余项标记为 `skipped` 而不是失败：失败意味着命令到了设备、设备拒绝了，用户该去查权限或存储；未执行意味着命令压根没发出去，用户该去查数据线。混成一类就会把人往错误的方向指。
 
+这一层收口在 `ShellContext.shell()` 一处：它把驱动调用本身和取消信号 race 起来，而不是裸 `await`。原因是 services 层有 76 处命令调用，绝大多数是单条（冻结一个应用、改一次分辨率、传一个文件），它们的取消语义全靠这一个出口 —— 只在两条批量路径外包一层，剩下的单条调用依旧会卡在一条永不兑现的 Promise 上，直到 USB 超时。
+
 **没有实现权限声明字段**。`available()` 判定依据的是连接时探测到的真实能力，而非静态声明的 `none` / `shell+` / `root` / `bootloader` 标签。这样做的理由是静态标签会过期：同一命令在不同 ROM 上的权限要求不同，声明的标签反而是误导。
 
 ### 13.4 敏感信息脱敏的现状
@@ -1324,7 +1326,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 212 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 224 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1391,7 +1393,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 90 个 `.ts` / `.tsx` 文件、0 处 `any`（含 12 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 91 个 `.ts` / `.tsx` 文件、0 处 `any`（含 13 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

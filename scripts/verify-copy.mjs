@@ -1054,6 +1054,57 @@ if (!shellExposesSignal) {
   pass('在途单条可被打断', 'app.service 与 vendor.service 的批量调用均 race 了取消信号');
 }
 
+/*
+ * 环 3b：`shell()` 自身必须把取消信号 race 上，不能裸 await 驱动。
+ *
+ * 环 3 只守住了两条批量路径 —— 而 services 层有 76 处命令调用，
+ * 绝大多数是单条（冻结一个应用、改一次分辨率、传一个文件）。
+ * 它们的取消语义全靠 `shell()` 这一个出口；出口裸 await 的话，
+ * 那 76 处每一个都会卡在一条永不兑现的 Promise 上直到 USB 超时。
+ *
+ * 判据按形状取，不按变量名：
+ *   1. 驱动调用被 `raceAbort(` 包住（不是直接 await）
+ *   2. 包它的那次 race 传的是同一个取消信号，不是 undefined
+ * 第二条单独判，是因为「调了 raceAbort 但信号传空」看起来像做了事，
+ * 实际等价于没做 —— 反向探针验过这种写法。
+ */
+const shellRaceCall = /raceAbort\s*\(\s*this\.driver\.exec\s*\(/.test(shellCode);
+/*
+ * 信号是否真的传进去了：raceAbort 的第二个实参必须是 finalSignal。
+ * 不写成「精确匹配整段调用」是因为缩进和换行会随格式化漂移，
+ * 一个空格差异就让断言假红，反而逼人去放宽它。
+ * 取 raceAbort 起 1500 字符窗口内出现 `finalSignal,` 作为判据，够窄也够稳。
+ */
+const raceAt = shellCode.search(/raceAbort\s*\(\s*this\.driver\.exec\s*\(/);
+const shellRaceSignalPassed =
+  raceAt >= 0 && /^\s*finalSignal,?\s*\)/m.test(shellCode.slice(raceAt, raceAt + 1500).split('}),')[1] ?? '');
+const shellBareAwait = /await\s+this\.driver\.exec\s*\(/.test(shellCode);
+
+if (!shellRaceCall) {
+  fail(
+    '单条命令路径可被打断',
+    'shell() 内 raceAbort 包住 driver.exec',
+    '缺失',
+    '76 处单条命令会卡在永不兑现的 Promise 上，拔线后一路等到 USB 超时',
+  );
+} else if (shellBareAwait) {
+  fail(
+    '单条命令路径可被打断',
+    '仍存在裸 await this.driver.exec',
+    '仅允许 race 那一处',
+    '两条路径并存时，走哪条决定拔线后是立刻返回还是挂两分钟',
+  );
+} else if (!shellRaceSignalPassed) {
+  fail(
+    '单条命令路径可被打断',
+    'raceAbort 调用了但信号未传入',
+    '必须传 finalSignal',
+    '信号传空等于没 race —— 形状对、行为不对',
+  );
+} else {
+  pass('单条命令路径可被打断', 'shell() 统一 race finalSignal，覆盖全部 76 处命令调用');
+}
+
 // 环 4：剩余项标 skipped，播报不混成失败
 const marksSkipped = /skipped:\s*true/.test(appServiceCode) && /skipped:\s*true/.test(vendorServiceCode);
 const reportKnowsSkipped = /pickSkipped/.test(batchReportCode ?? '');

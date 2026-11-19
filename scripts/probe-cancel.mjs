@@ -338,6 +338,56 @@ check(
   JSON.stringify(normal),
 );
 
+/* ── 4. 单条路径同样能被打断（不是只有批量才管） ── */
+/*
+ * 这一条守的是「收口有没有落在正确的那一层」。
+ *
+ * 上一轮只修了批量循环，单条冻结 / 启用、显示调节、文件传输走的还是裸 await。
+ * 它们数量占绝对多数（services 层 76 处命令调用里绝大部分是单条），
+ * 只是单次卡住的时长不像批量那样一眼可见 —— 用户会以为是「这条命令本来就慢」。
+ *
+ * 这里直接量 service 的单条方法，不再经过 batch()：如果取消只做在批量那一层，
+ * 这个用例会挂死（20 秒守卫判失败）。
+ */
+const single = await evaluate(`
+  (async () => {
+    const { ShellContext } = await import('/src/core/shell.ts');
+    const { AppService } = await import('/src/services/app.service.ts');
+    let sent = 0;
+    const driver = {
+      serial: 'PROBE0003', label: '死链路设备', connected: true,
+      async exec() {
+        sent += 1;
+        return new Promise(() => {});   // 链路已死：永不兑现
+      },
+      async openTerminal() { throw new Error('x'); }, async write() {},
+      async read() { return new Blob(); }, async control() { return ''; },
+      async reboot() {}, async close() {},
+    };
+    const shell = new ShellContext({ driver });
+    const apps = new AppService(shell, 33);
+    apps.isSystemPackage = async () => false;
+
+    const started = performance.now();
+    const running = apps.disable('com.probe.single');
+    for (let i = 0; i < 50 && sent === 0; i++) await new Promise(r => setTimeout(r, 20));
+    shell.abort(new Error('设备连接已结束'));
+
+    const outcome = await Promise.race([
+      running.then(() => 'ok', () => 'rejected'),
+      new Promise(r => setTimeout(() => r('hung'), 20000)),
+    ]);
+    return { outcome, elapsed: performance.now() - started, sent };
+  })()
+`);
+
+check('单条变更不挂死在死链路上', single.outcome !== 'hung', single.outcome);
+check(
+  '单条变更在取消后立即返回',
+  single.outcome === 'rejected' && single.elapsed < 5000,
+  `${single.outcome} / ${Math.round(single.elapsed)} ms`,
+);
+
 /* ── 输出 ── */
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

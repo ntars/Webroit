@@ -101,6 +101,20 @@ describe('explainError 规则命中', () => {
     expect(result.next).toContain('复查');
   });
 
+  /*
+   * 拔线中止用的是我们自己抛的原文「设备连接已结束」。
+   * 它必须落在「连接中断」这一档，不能被「已取消」规则抢走 ——
+   * 用户没有点中止，是线掉了：出口该是查数据线，不是「重新执行一次即可」。
+   */
+  it('拔线中止报「连接中断」，不混成「用户取消」', () => {
+    const lost = explainError(new Error('设备连接已结束'));
+    const cancelled = explainError(new Error('用户已取消'));
+    expect(lost.kind).toBe('disconnected');
+    expect(cancelled.kind).toBe('cancelled');
+    expect(lost.next).toContain('数据线');
+    expect(lost.next).not.toBe(cancelled.next);
+  });
+
   it('未选择设备指向重新选择', () => {
     const result = explainError(new DOMException('未选择设备', 'AbortError'));
     expect(result.reason).toContain('没有选择设备');
