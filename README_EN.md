@@ -35,7 +35,7 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 62 source files, 16,092 lines (CSS and tests included) |
+| Code size | 62 source files, 16,113 lines (CSS and tests included) |
 | Artifact size | 462 KB across 12 files; first paint roughly 56 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
