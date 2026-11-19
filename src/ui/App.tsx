@@ -33,6 +33,7 @@ import { ModuleView } from '@/ui/views/ModuleView';
 import { ConnectPanel } from '@/ui/views/ConnectPanel';
 import { EmergencyReset } from '@/ui/views/EmergencyReset';
 import { BrandBadge } from '@/ui/components/BrandBadge';
+import { ToastHost } from '@/ui/components/ToastHost';
 
 /** 应急入口的 hash 标记 */
 const EMERGENCY_HASH = '#/reset-display';
@@ -195,9 +196,22 @@ export const App: FunctionComponent = () => {
     ? visibleModules(currentSession!.capabilities)
     : visibleModules(PREVIEW_CAPABILITIES, true);
 
-  // 应急页完全独立渲染，不套侧边栏与外框 ——
-  // 界面被撑大时，任何外层布局都可能把按钮挤出可视区
-  if (emergency) return <EmergencyReset />;
+  /*
+   * 应急页完全独立渲染，不套侧边栏与外框 ——
+   * 界面被撑大时，任何外层布局都可能把按钮挤出可视区。
+   *
+   * 但提示层必须跟着走：这一页自己就有 2 处 toast（重置成功、重置失败），
+   * 少挂一个 ToastHost 就等于让「重置到底成没成」再次变成猜谜。
+   * 它是 position:fixed 的独立浮层，不参与应急页那套「单列大按钮」布局。
+   */
+  if (emergency) {
+    return (
+      <>
+        <EmergencyReset />
+        <ToastHost />
+      </>
+    );
+  }
 
   return (
     <div class="app" data-sidebar={prefs.sidebarCollapsed ? 'collapsed' : 'expanded'}>
@@ -362,6 +376,9 @@ export const App: FunctionComponent = () => {
           </div>
         </section>
       </main>
+
+      {/* 全局提示层：单例挂在最后，任何分区的执行结果都从这里出声 */}
+      <ToastHost />
 
       {/* 连接步骤：从提示条按需打开，不占用主浏览路径 */}
       {guide && (

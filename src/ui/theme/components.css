@@ -422,6 +422,120 @@ textarea.input {
   word-break: break-all;
 }
 
+/* ─────────────── 全局提示（toast） ─────────────── */
+
+/*
+ * 固定在右上角，而不是底部或居中。
+ *
+ * 底部被命令输出面板占着 —— 提示飘在那儿正好盖住用户正在读的回显，
+ * 而读回显往往是「操作到底成没成」的第二重确认。居中的模态式提示更糟：
+ * 它逼用户先关掉，等于给一次「导出成功」加了一步操作。
+ *
+ * 容器不吃指针事件，只有单条和关闭键吃：提示飘着的 3 秒里，
+ * 用户可能正要点击下面的按钮，浮层不该把这一下吞掉。
+ */
+.toast-stack {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(360px, calc(100vw - var(--space-8)));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 10px var(--space-3);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  pointer-events: auto;
+  animation: toast-in var(--duration-normal) var(--ease-out);
+}
+
+/*
+ * 浮层底色的取法：两套主题各取「离用户最近的那一层」。
+ * 深色是 overlay（#2c2c2c，比卡片更亮），浅色是 raised（纯白，比页面更白）。
+ * 直接写死其中一个都会在另一套主题里翻车 —— 浅色用 overlay 会比页面更灰，
+ * 看起来像一块被禁用的区域，而不是浮在页面之上的提示。
+ */
+[data-theme='light'] .toast {
+  background: var(--bg-raised);
+}
+
+/* 左侧色条是唯一的分级信号：文字一律用正文色，保证在两种主题下都够对比度 */
+.toast[data-kind='success'] {
+  border-left-color: var(--success);
+}
+
+.toast[data-kind='error'] {
+  border-left-color: var(--danger);
+}
+
+/*
+ * info 用三级文字色而不是 accent-text：后者在浅色主题下就是正文黑（#191919），
+ * 色条与文字完全同色，等于三条分支里有一条在视觉上不存在。
+ * 三级灰与正文有明确明度差，又保持「无情绪」的中性表达。
+ */
+.toast[data-kind='info'] {
+  border-left-color: var(--text-tertiary);
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/*
+ * 关闭键做成 22px 的圆形图标，视觉上不抢戏。
+ * 负外边距把它顶到卡片右边缘，抵消卡片的右内边距 ——
+ * 否则图标会明显往内缩，看起来像浮在文字中间。
+ */
+.toast__close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.toast__close:hover {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ─────────────── 窄屏触控尺寸 ─────────────── */
 
 /*
@@ -456,5 +570,16 @@ textarea.input {
   /* 侧边栏项拉高后行距变大，导航总高会顶出视口 —— 收紧项间距抵消 */
   .sidebar__nav {
     gap: 0;
+  }
+
+  /*
+   * 提示的关闭键：视觉仍是 22px 的圆点，但命中区补到 44px。
+   * 用负外边距把多出来的 22px 吐回布局，卡片高度与内边距一点不变 ——
+   * 手指点得中，眼睛看到的密度也没变。
+   */
+  .toast__close {
+    width: 44px;
+    height: 44px;
+    margin: -12px -10px -12px 0;
   }
 }

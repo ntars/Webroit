@@ -35,7 +35,7 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 76 个源文件、16,446 行（含 CSS 与测试） |
+| 代码规模 | 77 个源文件、16,646 行（含 CSS 与测试） |
 | 产物规模 | 471 KB / 12 个文件，首屏 gzip 约 59 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
@@ -1375,7 +1375,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 72 个 `.ts` / `.tsx` 文件、0 处 `any`（含 7 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 73 个 `.ts` / `.tsx` 文件、0 处 `any`（含 7 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

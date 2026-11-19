@@ -163,11 +163,11 @@ if (typeof explainError !== 'function') {
 
 /* ─────────────── B. 静态：界面是否绕过翻译层 ─────────────── */
 
-function walk(dir, out = []) {
+function walk(dir, out = [], pattern = /\.tsx$/) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else if (/\.tsx$/.test(name)) out.push(full);
+    if (statSync(full).isDirectory()) walk(full, out, pattern);
+    else if (pattern.test(name)) out.push(full);
   }
   return out;
 }
@@ -220,6 +220,98 @@ for (const [label, rel, re] of REQUIRED) {
 missing.length === 0
   ? pass('四类情形均有承载组件', REQUIRED.map((r) => r[0]).join(' / '))
   : fail('四类情形承载组件', missing.length, missing.join('；'));
+
+/* ─────────────── C. 反馈通路：toast 必须有出口 ─────────────── */
+
+/*
+ * A 段守的是「提示写得清不清楚」，C 段守的是「提示到底出不出得来」。
+ *
+ * 这两件事曾经同时是坏的：`toast()` 写得好好的，18 处调用点分布在 8 个文件里，
+ * 但 `toasts` 信号没有任何订阅者。文案再清楚，进了内存就等于没写 ——
+ * 用户点「卸载应用」，界面毫无变化，他只能再点一次。
+ *
+ * 所以这里断言的是一条链，三环缺一不可：
+ *   1. 有人发（`toast(` 调用点数 > 0）
+ *   2. 有人收（存在读 `toasts` 信号的组件）
+ *   3. 收的人被挂上了（`App.tsx` 里真的渲染了它）
+ *
+ * 第 3 环最容易断：组件写好了、测试也过了，但忘了挂到外壳上，
+ * 或者只在正常分支挂、漏了应急页分支 —— 后者是真实踩过的坑。
+ */
+
+/** 数出真正发消息的调用点：排除 `dismissToast(` 与函数自身定义 */
+function countToastCalls() {
+  let calls = 0;
+  const perFile = [];
+  for (const file of walk(join(ROOT, 'src'), [], /\.tsx?$/)) {
+    const text = readFileSync(file, 'utf8');
+    let hits = 0;
+    for (const line of text.split('\n')) {
+      // 跳过注释行：本仓库的注释会引用 `toast()` 说明设计意图，不该计入
+      const t = line.trim();
+      if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue;
+      // `export function toast(` 是定义，不是调用
+      if (/export function toast\s*\(/.test(line)) continue;
+      if (/\btoast\s*\(/.test(line)) hits++;
+    }
+    if (hits > 0) {
+      calls += hits;
+      perFile.push(`${file.replace(ROOT + '/', '')}(${hits})`);
+    }
+  }
+  return { calls, perFile };
+}
+
+/** 找出订阅了 `toasts` 信号的组件（从 app-state 导入并读取） */
+function findToastConsumer() {
+  for (const file of walk(join(ROOT, 'src/ui'))) {
+    const text = readFileSync(file, 'utf8');
+    const importsToasts = /\btoasts\b/.test(text) && /from\s+'@\/ui\/state\/app-state'/.test(text);
+    if (!importsToasts) continue;    // 消费 = 把信号交给订阅原语，而不是只 import 了名字
+    if (/useSignal\s*\(\s*toasts\s*\)/.test(text)) return file;
+  }
+  return null;
+}
+
+const { calls, perFile } = countToastCalls();
+const consumer = findToastConsumer();
+
+if (calls === 0) {
+  // 一条提示都不发时，「有出口」无从谈起，但也不该判失败 —— 记录事实即可
+  pass('提示调用点', '0 处（无提示文案需要出口）');
+} else if (!consumer) {
+  fail(
+    '提示有出口',
+    `${calls} 处调用但无消费组件`,
+    `没有任何组件用 useSignal(toasts) 订阅提示队列，用户看不到这些提示：${perFile.join('、')}`,
+  );
+} else {
+  const rel = consumer.replace(ROOT + '/', '');
+  const appText = readFileSync(join(ROOT, 'src/ui/App.tsx'), 'utf8');
+  // 组件名从文件名推：ToastHost.tsx → ToastHost
+  const name = rel.split('/').pop().replace(/\.tsx$/, '');
+
+  if (!appText.includes(`<${name}`)) {
+    fail('提示已挂载', `${rel} 未被 App.tsx 渲染`, `外壳里找不到 <${name} />`);
+  } else {
+    /*
+     * 应急页分支必须单独确认。
+     *
+     * 这一页 return 得早（`if (emergency) return <EmergencyReset />`），
+     * 外壳末尾挂的提示层根本走不到。而它自己就有 2 处 toast 调用 ——
+     * 「重置分辨率」这种救命操作的结果提示，恰恰是最不能丢的那条。
+     */
+    const earlyReturn = /if\s*\(\s*emergency\s*\)\s*\{?\s*return\s*\(?([\s\S]{0,200})/.exec(appText);
+    const covered = earlyReturn ? earlyReturn[1].includes(`<${name}`) : false;
+    covered
+      ? pass('提示有出口', `${calls} 处调用 → ${rel}，含应急页分支`)
+      : fail(
+          '应急页提示通路',
+          `${rel} 未覆盖 emergency 分支`,
+          '应急页提前 return，尾部挂载的提示层走不到，而该页有 toast 调用',
+        );
+  }
+}
 
 /* ─────────────── 输出 ─────────────── */
 

@@ -35,7 +35,7 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 76 source files, 16,446 lines (CSS and tests included) |
+| Code size | 77 source files, 16,646 lines (CSS and tests included) |
 | Artifact size | 471 KB across 12 files; first paint roughly 59 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
@@ -1372,7 +1372,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 72 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 73 `.ts` / `.tsx` files, 0 places of `any` (seven are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 
