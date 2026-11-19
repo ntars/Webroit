@@ -35,8 +35,8 @@
 | Form factor | Browser single-page application (PWA, installable, opens offline) |
 | Trademark | The "Webroit" name and interface belong to Ntarstudio |
 | Backend | None. Static hosting, zero server |
-| Code size | 82 source files, 17,664 lines (CSS and tests included) |
-| Artifact size | 482 KB across 12 files; first paint roughly 62 KB gzipped |
+| Code size | 85 source files, 17,951 lines (CSS and tests included) |
+| Artifact size | 484 KB across 12 files; first paint roughly 62 KB gzipped |
 | Dependencies | 25 components, all MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -396,8 +396,10 @@ export function settingsInverse(scope: string, key: string, original: string): s
 The fear with DPI changes is an interface so large that the reset button cannot be reached. Three lines of defence, from lightest to heaviest:
 
 1. **Automatic snapshot before the change.** Every `settings put` / `wm` write reads the previous value into IndexedDB (`src/core/snapshot.ts`) first; "one-click restore settings" replays by `seq` in reverse. Snapshots are kept only for **the current session** — replaying stale values across sessions computes the wrong result.
-2. **A URL-reachable emergency entry** at `#/reset-display`, a page with a single button and no sidebar. Every dimension on this page is **in px**, never em or rem. Measured with the root font size scaled to 2.5× (24px → 40px), the button remains 462×64 in the same position with no horizontal scrolling.
+2. **A URL-reachable emergency entry**, accepted in two forms: `#/reset-display` and `?reset-display`. A page with a single button and no sidebar. Every dimension on this page is **in px**, never em or rem — measured with the root font size scaled to 2.5× (24px → 40px), the button remains 462×64 in place with no horizontal scrolling. "Back to the main interface" **clears both markers** (hash and query string) before withdrawing the view. Clearing only one leaves anyone who arrived via the query string stuck on the escape page: the address changes but the page does not. Five assertions in `verify:docs` guard this.
 3. **Persistent terminal shortcuts** `wm size reset; wm density reset` in the top bar; one tap executes them in any session, independent of the two mechanisms above.
+
+Its "current connection status" line has three states (connected / connecting… / not connected) and shares the single connection path in `src/ui/state/connect.ts` — including disconnect watching, so it no longer keeps saying "connected" after the cable is pulled.
 
 The difference between 1 and 2/3: a snapshot restores "the value you last set", while the emergency reset pulls back the **device's physical value**. Use the former after a bad change, the latter when the interface is no longer usable — since a snapshot may itself hold a wrong value.
 
@@ -662,7 +664,7 @@ npm run preview    # preview the build output locally
 
 `build` is three chained steps and the third cannot be skipped: `dist/sw.js` carries a `__SW_VERSION__` placeholder before injection, and an uninjected version cannot register. Running `vite build` alone produces an unusable Service Worker.
 
-`npm test` runs `src/**/*.test.ts`: 8 files, 170 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`, `/ui/state/progress`). Tests sit next to the files they cover, so they are right there when the code changes.
+`npm test` runs `src/**/*.test.ts`: 9 files, 181 cases, all confined to the pure-function layer that never touches the DOM (`/core/utils`, `/core/snapshot`, `/core/transport/stream`, `/core/error-copy`, `/tools/registry`, `/tools/builtin`, `/node/errors`, `/ui/state/progress`, `/ui/routing/route`). Tests sit next to the files they cover, so they are right there when the code changes.
 
 `src/tools/builtin.test.ts` is a registry snapshot test: now that tool definitions are split across seven files under `src/tools/defs/`, assembly order is decided in one place, `builtin.ts`. Dropping a spread (forgetting `...vendorToolsAll`, say) still type-checks, yet the entire vendor section vanishes. The test pins the numbers 34 / 26 / 24, the per-section distribution, id uniqueness, and the vendor pairing.
 
@@ -1026,7 +1028,8 @@ Webroit/
 │   │       └── handle.ts           # Method dispatch and the tools/call implementation
 │   └── ui/
 │       ├── App.tsx                 # Shell: sidebar + main area + terminal; emergency route dispatch
-│       ├── state/                  # Signals, global actions, progress throttling
+│       ├── routing/                # Route ownership and emergency exit (single source of URL semantics)
+│       ├── state/                  # Signals, global actions, connection path, progress throttling
 │       ├── components/             # ToolCard, Terminal, PwaPrompt, ProgressStrip, and others
 │       ├── views/                  # Section pages
 │       └── theme/                  # Design tokens and four stylesheets
@@ -1052,13 +1055,13 @@ Measurement environment: macOS 15 / Apple Silicon, Node.js 22.22.2, Vite 7.3.8, 
 
 | Artifact | Raw size | gzip | Notes |
 |---|---|---|---|
-| `index-*.js` | 153.9 KB | 53.0 KB | Required for first paint: Preact, tool registry, all services and views |
-| `index-*.css` | 41.4 KB | 7.4 KB | Five stylesheets merged |
+| `index-*.js` | 155.1 KB | 53.5 KB | Required for first paint: Preact, tool registry, all services and views |
+| `index-*.css` | 41.7 KB | 7.5 KB | Five stylesheets merged |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB transport layer, loaded on connect |
 | `index.html` | 2.2 KB | 1.1 KB | Includes PWA metadata |
 | Icons total | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
-| **First paint total** | **about 197 KB** | **about 62 KB** | JS + CSS + HTML, excluding icons |
-| **Full artifact** | **482 KB** | **—** | 12 files in `dist/` |
+| **First paint total** | **about 199 KB** | **about 62 KB** | JS + CSS + HTML, excluding icons |
+| **Full artifact** | **484 KB** | **—** | 12 files in `dist/` |
 
 Build time 0.8 seconds, 180 modules. Type checking via `tsc --noEmit` reports zero errors.
 
@@ -1374,7 +1377,7 @@ interface ByteSource {
 
 `collect()` accepts that, so the streams from `exec()` and `read()` pass straight in. The other direction — handing `File.stream()` to `sync.write()` — re-wraps it in the package's own `ReadableStream` constructor, wiring its `pull` to the DOM reader. Since both are the same constructor at runtime, this is zero-copy; it only makes the types line up.
 
-`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 78 `.ts` / `.tsx` files, 0 places of `any` (eight are test files).
+`no-explicit-any` now applies **repo-wide**: the exemption for `driver.ts` in `eslint.config.js` is gone, and `verify:docs` recounts `any` and fails on a single occurrence. 81 `.ts` / `.tsx` files, 0 places of `any` (nine are test files).
 
 The one remaining convention is "the UI layer must not import `@yume-chan/adb`", still held by code review rather than a custom ESLint rule.
 

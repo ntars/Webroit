@@ -25,6 +25,7 @@ import {
   terminalLines,
   updatePreferences,
 } from '@/ui/state/app-state';
+import { route, syncRoute } from '@/ui/routing/route';
 import { useSignal } from '@/ui/state/signal';
 import { Terminal } from '@/ui/components/Terminal';
 import { InstallButton, UpdateBanner } from '@/ui/components/PwaPrompt';
@@ -36,21 +37,6 @@ import { BrandBadge } from '@/ui/components/BrandBadge';
 import { ToastHost } from '@/ui/components/ToastHost';
 import { SettingsSheet } from '@/ui/components/SettingsSheet';
 import { ProgressStrip } from '@/ui/components/ProgressStrip';
-
-/** 应急入口的 hash 标记 */
-const EMERGENCY_HASH = '#/reset-display';
-
-/**
- * 判断当前是否进入应急重置页。
- *
- * 除了 `#/reset-display`，还认 `?reset-display` ——
- * 有些用户会直接改查询串而不是 hash，两种都放行成本极低。
- */
-function isEmergencyRoute(): boolean {
-  if (typeof location === 'undefined') return false;
-  if (location.hash === EMERGENCY_HASH) return true;
-  return new URLSearchParams(location.search).has('reset-display');
-}
 
 /** SVG 图标 */
 function Icon({ path, size = 16 }: { path: string; size?: number }) {
@@ -146,16 +132,27 @@ export const App: FunctionComponent = () => {
   const updateHandler = useSignal(pendingUpdate);
   const lostReason = useSignal(disconnectReason);
   const terminalRef = useRef<HTMLDivElement>(null);
-  const [emergency, setEmergency] = useState(isEmergencyRoute);
+  const currentRoute = useSignal(route);
+  const emergency = currentRoute === 'emergency';
   const [guide, setGuide] = useState(false);
   const [settings, setSettings] = useState(false);
   const { connect, busy: connecting, message: connectMessage, supported } = useConnect();
 
-  // hash 变化要能切换页面 —— 用户在应急页点「返回主界面」时靠这个回到正常界面
+  /*
+   * 地址变化要能切换页面。
+   *
+   * 两种事件都要监听：hash 变化给 hashchange，`history.replaceState`（退出应急页
+   * 时用它，避免在历史里留一条记录）只给 popstate。少听一个就有一种路径
+   * 点完没反应 —— 而这一页正是「别的路都走不通」时用的。
+   */
   useEffect(() => {
-    const sync = () => setEmergency(isEmergencyRoute());
+    const sync = () => syncRoute();
     window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+    window.addEventListener('popstate', sync);
+    return () => {
+      window.removeEventListener('hashchange', sync);
+      window.removeEventListener('popstate', sync);
+    };
   }, []);
 
   /*

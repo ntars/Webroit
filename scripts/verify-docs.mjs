@@ -525,6 +525,118 @@ const kb = (bytes) => (bytes / 1024).toFixed(1);
   }
 }
 
+// 5e. 应急重置页的退出通路：进得去必须也出得来
+/*
+ * 这条校验的来历：应急页有两种入口（`#/reset-display` 与 `?reset-display`），
+ * 而「返回主界面」原来是个 `<a href="#/">` —— 只改 hash。
+ * 从查询串进来的人点完，地址变成 `/?reset-display#/`，判定条件里的
+ * 查询串那一支依然成立，页面纹丝不动。**进得去、出不来，逃生通道自己锁死。**
+ * 而无头 Chrome 实测也证实了：`.emergency` 仍在、`.app` 不出现。
+ *
+ * 所以断言的是「退出动作覆盖了两种入口」这件事本身：
+ *   1. 存在路由层，且它的退出函数会清掉查询串标记（纯函数，可静态读）
+ *   2. 应急页的退出按钮调的是这个函数，而不是自己拼 `href="#/"`
+ *   3. App 的页面判定用同一份路由，不再各存一份 hash 常量
+ */
+{
+  const routePath = join(ROOT, 'src/ui/routing/route.ts');
+  const emergencyPath = join(ROOT, 'src/ui/views/EmergencyReset.tsx');
+  const appPath = join(ROOT, 'src/ui/App.tsx');
+
+  if (!existsSync(routePath)) {
+    fail('应急页退出通路', '路由层存在', '缺失', 'src/ui/routing/route.ts');
+  } else if (!existsSync(emergencyPath) || !existsSync(appPath)) {
+    fail('应急页退出通路', '组件存在', '缺失', 'EmergencyReset.tsx / App.tsx');
+  } else {
+    const routeText = readFileSync(routePath, 'utf8');
+    const emergencyText = readFileSync(emergencyPath, 'utf8');
+    const appText = readFileSync(appPath, 'utf8');
+
+    // 1. 判定函数必须两种入口都认，否则「出得来」无从谈起（根本进不去）
+    const hasFlag = /EMERGENCY_FLAG\s*=\s*'reset-display'/.test(routeText);
+    const hasHash = /EMERGENCY_HASH\s*=\s*'#\/reset-display'/.test(routeText);
+    const readsSearch = /URLSearchParams\s*\(\s*search\s*\)/.test(routeText);
+    const clearsFlag = /params\.delete\(\s*EMERGENCY_FLAG\s*\)/.test(routeText);
+
+    // 2. 退出动作两处都清：查 search 清空 + 查 hash 清空，缺一即为原缺陷
+    const clearsBoth = /nextHash\s*=\s*hash\s*===\s*EMERGENCY_HASH/.test(routeText) && clearsFlag;
+
+    if (hasFlag && hasHash && readsSearch && clearsFlag) {
+      pass('应急页双入口', 'hash 与查询串都认，退出时清查询串标记');
+    } else {
+      fail(
+        '应急页双入口',
+        `flag ${hasFlag} / hash ${hasHash} / 读查询串 ${readsSearch} / 清标记 ${clearsFlag}`,
+        '四项都要有',
+        '只认一种入口或退出只清一处，都会让用户进得去出不来',
+      );
+    }
+
+    clearsBoth
+      ? pass('应急页退出清两处标记', 'hash 与查询串同时清')
+      : fail('应急页退出清两处标记', '只清一处', '两处都要清', '这正是本轮修的缺陷');
+
+    // 3. 应急页不得再自己拼 `href="#/"`：那正是失效的旧实现
+    /*
+     * 必须先剥掉块注释再扫。
+     *
+     * 本仓库的注释习惯是「引用旧写法，说明为什么改成现在这样」，
+     * 而 JSX 的块注释 `{/* ... *\/}` 内层行并不以 `*` 开头 ——
+     * 按行首字符跳过注释的老办法会漏掉它们，把说明文字当成真代码，
+     * 于是这条断言永远为红。剥注释比逐行猜可靠。
+     */
+    const codeOnly = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const handRolled = /href="#\/"/.test(codeOnly(emergencyText));
+    const usesLeave = /leaveEmergency/.test(emergencyText) && /onClick=\{\s*leaveEmergency\s*\}/.test(emergencyText);
+    if (handRolled) {
+      fail('应急页退出按钮', '用 leaveEmergency()', '仍有 href="#/"', '只改 hash 对查询串入口无效');
+    } else if (!usesLeave) {
+      fail('应急页退出按钮', '用 leaveEmergency()', '未调用', '退出必须走路由层，否则容易再漏一处');
+    } else {
+      pass('应急页退出按钮', '走 leaveEmergency()');
+    }
+
+    // 4. App 不得再自己维护一份应急判定：两份判定必然再次分叉
+    const localJudge = /function\s+isEmergencyRoute|const\s+EMERGENCY_HASH/.test(appText);
+    const usesRoute = /import\s*{[^}]*\broute\b[^}]*}\s*from\s*'@\/ui\/routing\/route'/.test(appText);
+    if (localJudge) {
+      fail('应急页判定单一真源', 'App 用 route 信号', 'App 里仍有本地判定', '两份判定会再次分叉');
+    } else if (!usesRoute) {
+      fail('应急页判定单一真源', 'App 用 route 信号', 'App 未引用路由层', 'src/ui/App.tsx');
+    } else {
+      pass('应急页判定单一真源', 'App 订阅 route 信号');
+    }
+
+    /*
+     * 5. 应急页必须复用共享连接链路，不许自己再拼一遍。
+     *
+     * 它原来自己调 createSession + createServices，与主界面各一份。
+     * 抄出来的那份漏了 `whenDisconnected` 监听 —— 拔掉数据线后，
+     * 这一页的「当前连接状态」还写着「已连接」，点还原报的错也没人翻译。
+     * 连接链路五个步骤少任何一步都不报错，只是状态悄悄错位。
+     */
+    const connectPath = join(ROOT, 'src/ui/state/connect.ts');
+    if (!existsSync(connectPath)) {
+      fail('应急页连接链路', '共享链路存在', '缺失', 'src/ui/state/connect.ts');
+    } else {
+      const connectText = readFileSync(connectPath, 'utf8');
+      const watchesDrop = /whenDisconnected/.test(connectText) && /loseConnection\(/.test(connectText);
+      const emergencyUses = /from\s*'@\/ui\/state\/connect'/.test(emergencyText) && /connectDevice\s*\(/.test(emergencyText);
+      const emergencyRollsOwn = /createSession\s*\(|createServices\s*\(/.test(emergencyText);
+
+      if (!watchesDrop) {
+        fail('连接链路断线监听', '共享链路含 whenDisconnected', '缺失', '拔线后界面会继续显示已连接');
+      } else if (emergencyRollsOwn) {
+        fail('应急页连接链路', '复用 connectDevice()', '仍自己拼链路', '自拼的那份必然漏步骤');
+      } else if (!emergencyUses) {
+        fail('应急页连接链路', '复用 connectDevice()', '未引用', 'src/ui/views/EmergencyReset.tsx');
+      } else {
+        pass('应急页连接链路', '与主界面共用 connectDevice()，含断线监听');
+      }
+    }
+  }
+}
+
 // 6. 中英文档章节数一致
 if (readmeEn) {
   const count = (text, re) => (text.match(re) ?? []).length;

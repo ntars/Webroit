@@ -8,21 +8,21 @@
  *
  * 这一页刻意做得极简：
  * - 一个超大的按钮，占满视口宽度，必然可点
- * - 不依赖侧边栏、不依赖分区切换、不依赖设备连接状态
- * - 未连接时会提示先连接，连接成功后按钮才可用
+ * - 不依赖侧边栏、不依赖分区切换
+ * - 未连接时会自己先连一次，不要求用户回主页点连接
  *
  * 触发方式：地址栏追加 `#/reset-display`，或直接访问 `/?reset-display`。
- * 这一点写进了 docs/05-风险与合规.md 的 R4 防护措施。
+ * 退出走 `leaveEmergency()` —— 两种入口的标记都在那里清，
+ * 上一版只清 hash，从查询串进来的人点了「返回主界面」纹丝不动。
  */
 
 import { type FunctionComponent } from 'preact';
 import { useState } from 'preact/hooks';
 
-import { createSession } from '@/core/session/device-session';
-import { connectUsb } from '@/core/transport/driver';
-import { createServices } from '@/services/index';
+import { connectDevice } from '@/ui/state/connect';
 import { explainError } from '@/core/error-copy';
-import { phase, pushOutput, services, session, toast } from '@/ui/state/app-state';
+import { phase, services, toast } from '@/ui/state/app-state';
+import { leaveEmergency } from '@/ui/routing/route';
 import { useSignal } from '@/ui/state/signal';
 
 export const EmergencyReset: FunctionComponent = () => {
@@ -31,35 +31,46 @@ export const EmergencyReset: FunctionComponent = () => {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ reason: string; next: string } | null>(null);
+  const [cancelled, setCancelled] = useState(false);
 
-  /** 未连接时先连一次 —— 应急场景不能要求用户先回主页点连接 */
-  const ensureConnected = async () => {
-    if (current) return current;
-
-    setMessage('正在连接设备，请在手机上允许 USB 调试…');
-    const created = await createSession(async () => {
-      pushOutput('info', '应急重置：请求 USB 设备访问权限');
-      return connectUsb();
-    });
-
-    const built = createServices(created, {
-      output: (channel, text) => pushOutput(channel, text),
-    });
-    services.set(built);
-    session.set(created);
-    phase.set('ready');
-    return built;
-  };
+  /*
+   * 状态行的三态。
+   *
+   * 上一版写的是 `current ? '已连接' : currentPhase === 'ready' ? '已连接' : '未连接'`
+   * —— 第二个分支永远走不到（services 已置空时 phase 不可能是 ready），
+   * 而真正该说的是「正在连，请别动」。这里按「有服务 / 传输中 / 其他」三分。
+   */
+  const connectionLabel = current
+    ? '已连接'
+    : currentPhase === 'requesting' || currentPhase === 'authenticating' || currentPhase === 'probing'
+      ? '连接中…'
+      : '未连接';
 
   const reset = async () => {
     if (busy) return;
     setBusy(true);
     setFailure(null);
-    setMessage('正在还原…');
+    setCancelled(false);
 
     try {
-      const active = await ensureConnected();
-      const summary = await active.system.emergencyRestore();
+      setMessage('正在连接设备，请在手机上允许 USB 调试…');
+      // 链路与主界面共用同一份：断线监听、阶段迁移、错误翻译都在里面
+      const outcome = await connectDevice();
+
+      if (outcome.status === 'cancelled') {
+        // 用户自己关掉了设备选择框，不是失败。给一条温和的出口，别报红。
+        setMessage(null);
+        setCancelled(true);
+        return;
+      }
+      if (outcome.status === 'failed') {
+        setMessage(null);
+        setFailure({ reason: outcome.reason, next: outcome.next });
+        return;
+      }
+
+      setMessage('正在还原…');
+      const summary = await outcome.services.system.emergencyRestore();
       setMessage(summary);
       toast('success', summary);
     } catch (error) {
@@ -67,6 +78,9 @@ export const EmergencyReset: FunctionComponent = () => {
        * 应急页最怕「只给一句报错」。用户此刻界面已经错乱，
        * 唯一的指望就是这个页面，所以必须把下一步说死 ——
        * 连不上设备时下面还有一段折叠的手动命令清单，文案里直接指向它。
+       *
+       * 文案走翻译层而不是自己拼：`error.message` 是 adb 的英文原文，
+       * 而这一页的使用者此刻最需要的是一句中文的「下一步做什么」。
        */
       const explained = explainError(error);
       setMessage(null);
@@ -113,6 +127,12 @@ export const EmergencyReset: FunctionComponent = () => {
           </div>
         )}
 
+        {cancelled && (
+          <div class="notice">
+            <p>没有选择设备，什么也没改。想继续的话再点一次「立即还原」。</p>
+          </div>
+        )}
+
         {message && !failure && (
           <div class="notice">
             <p>{message}</p>
@@ -120,10 +140,15 @@ export const EmergencyReset: FunctionComponent = () => {
         )}
 
         <div class="emergency__foot">
-          <a href="#/" class="link">返回主界面</a>
-          <span class="emergency__hint">
-            当前连接状态：{current ? '已连接' : currentPhase === 'ready' ? '已连接' : '未连接'}
-          </span>
+          {/*
+            退出必须走 leaveEmergency()：它把 hash 与查询串两处标记一起清掉。
+            上一版是普通链接 `<a href="#/">`，只改 hash —— 从 `?reset-display`
+            进来的人点了没反应，被永久留在这一页。
+          */}
+          <button type="button" class="link emergency__exit" onClick={leaveEmergency}>
+            返回主界面
+          </button>
+          <span class="emergency__hint">当前连接状态：{connectionLabel}</span>
         </div>
 
         <details class="emergency__manual">

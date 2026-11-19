@@ -1128,6 +1128,40 @@
   text-decoration: underline;
 }
 
+/*
+ * 退出按钮：外观是链接，行为是按钮。
+ *
+ * 它原来是 `<a href="#/">`，只能改 hash —— 从 `?reset-display` 进来的人
+ * 点完地址栏变了、页面不变，被永久留在这一页。改成 button 后必须把
+ * 浏览器给按钮的默认样式全部抹掉，否则会变成一个灰底方框，
+ * 与「返回上一层的文字链接」这个语义不符。
+ */
+.emergency__exit {
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--accent-text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  /*
+   * 触控高度必须补到 44px。
+   *
+   * 这一页最可能被手指点到的场合就是「DPI 被改坏、界面巨大」——
+   * 恰恰是最不能要求精确点击的场合。实测初版只有 65×32，
+   * 低于 WCAG 2.5.5 与 Apple HIG 的 44px 门槛。
+   * 用 flex 居中而不是加 padding：文字基线不会被撑偏，视觉尺寸仍是一行小字。
+   */
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.emergency__exit:hover {
+  text-decoration: underline;
+}
+
 .emergency__manual {
   margin-top: 20px;
   padding-top: 16px;

@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 82 个源文件、17,664 行（含 CSS 与测试） |
-| 产物规模 | 482 KB / 12 个文件，首屏 gzip 约 62 KB |
+| 代码规模 | 85 个源文件、17,951 行（含 CSS 与测试） |
+| 产物规模 | 484 KB / 12 个文件，首屏 gzip 约 62 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -398,8 +398,10 @@ export function settingsInverse(scope: string, key: string, original: string): s
 改 DPI 最怕界面巨大到点不到「重置」按钮。三道防线，从轻到重：
 
 1. **改前自动快照**。所有 `settings put` / `wm` 写入在改之前先读原值存入 IndexedDB（`src/core/snapshot.ts`），点「一键还原设置」按 `seq` 逆序回放。快照只保留**本次会话** —— 跨会话回放陈旧值会算错。
-2. **URL 直达应急入口** `#/reset-display`，整页只有一个按钮，不套侧边栏。这一页所有尺寸**全部用 px**，不用 em/rem。实测把根字号放大到 2.5 倍（24px → 40px），按钮仍为 462×64，位置不变，无横向滚动。
+2. **URL 直达应急入口**，两种写法都认：`#/reset-display` 与 `?reset-display`。整页只有一个按钮，不套侧边栏。这一页所有尺寸**全部用 px**，不用 em/rem。实测把根字号放大到 2.5 倍（24px → 40px），按钮仍为 462×64，位置不变，无横向滚动。「返回主界面」会**同时清掉两处标记**（`hash` 与查询串）再撤回视图 —— 只清一处的话，从查询串进来的人点完地址变了、页面不动，等于被锁在逃生页里；这一点由 `verify:docs` 的五项断言守着。
 3. **终端顶栏常驻快捷命令** `wm size reset; wm density reset`，任何会话一点即执行，不依赖上面两条。
+
+这一页的「当前连接状态」是三态（已连接 / 连接中… / 未连接），且与主界面共用同一条连接链路（`src/ui/state/connect.ts`）——包括断线监听，所以拔线后它不会继续显示「已连接」。
 
 第 1 条与第 2、3 条的区别：快照还原的是「你上次设的值」，应急重置拉回的是**设备物理值**。改坏了用前者，改到没法操作了用后者 —— 快照本身也可能记录的是错值。
 
@@ -666,7 +668,7 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 8 个文件、170 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 9 个文件、181 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 其中 `src/tools/builtin.test.ts` 是注册表快照测试：工具定义按分区拆到 `src/tools/defs/` 下七个文件后，拼装顺序只由 `builtin.ts` 一处决定，漏掉一行展开符号（比如忘了 `...vendorToolsAll`）typecheck 照样通过，但品牌专区分区会整块消失。该测试锁住 34 / 26 / 24 三个数字、分区分布、id 唯一性与品牌配对。
 
@@ -1030,7 +1032,8 @@ Webroit/
 │   │       └── handle.ts           # 方法分发与 tools/call 实现
 │   └── ui/
 │       ├── App.tsx                 # 外壳：侧边栏 + 主区域 + 终端；应急路由分流
-│       ├── state/                  # signal、全局动作、传输进度降频
+│       ├── routing/                # 页面归属判定与应急页退出（URL 语义唯一真源）
+│       ├── state/                  # signal、全局动作、连接链路、传输进度降频
 │       ├── components/             # ToolCard、Terminal、PwaPrompt、ProgressStrip 等
 │       ├── views/                  # 各分区页面
 │       └── theme/                  # 设计令牌与四份样式表
@@ -1056,13 +1059,13 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 153.9 KB | 53.0 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
-| `index-*.css` | 41.4 KB | 7.4 KB | 五份样式表合并后 |
+| `index-*.js` | 155.1 KB | 53.5 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.css` | 41.7 KB | 7.5 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
 | 图标合计 | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
-| **首屏合计** | **约 197 KB** | **约 62 KB** | JS + CSS + HTML，不含图标 |
-| **全量产物** | **482 KB** | **—** | `dist/` 12 个文件 |
+| **首屏合计** | **约 199 KB** | **约 62 KB** | JS + CSS + HTML，不含图标 |
+| **全量产物** | **484 KB** | **—** | `dist/` 12 个文件 |
 
 构建耗时 0.8 秒，模块数 180。类型检查 `tsc --noEmit` 零错误。
 
@@ -1310,7 +1313,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 170 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 181 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1377,7 +1380,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 78 个 `.ts` / `.tsx` 文件、0 处 `any`（含 8 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 81 个 `.ts` / `.tsx` 文件、0 处 `any`（含 9 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 
