@@ -35,8 +35,8 @@
 | 形态 | 浏览器单页应用（PWA，可安装、可离线打开） |
 | 许可 | Apache-2.0 / MIT（「Webroit」名称与界面归星玖工作室 Ntarstudio） |
 | 后端 | 无。静态托管，零服务端 |
-| 代码规模 | 85 个源文件、17,954 行（含 CSS 与测试） |
-| 产物规模 | 484 KB / 12 个文件，首屏 gzip 约 62 KB |
+| 代码规模 | 87 个源文件、18,244 行（含 CSS 与测试） |
+| 产物规模 | 486 KB / 12 个文件，首屏 gzip 约 62 KB |
 | 依赖 | 25 个组件，全部 MIT / ISC / BSD / Apache-2.0 |
 
 ---
@@ -668,7 +668,7 @@ npm run preview    # 本地预览构建产物
 
 `build` 是三步串联，第三步不可省略：`dist/sw.js` 在注入前带有 `__SW_VERSION__` 占位符，未经注入的版本无法注册。单独执行 `vite build` 会得到不可用的 Service Worker。
 
-`npm test` 跑的是 `src/**/*.test.ts`，共 9 个文件、181 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`）。测试与被测文件同目录，改代码时测试就在旁边。
+`npm test` 跑的是 `src/**/*.test.ts`，共 10 个文件、187 个用例，全部落在不碰 DOM 的纯函数层（`/core/utils`、`/core/snapshot`、`/core/transport/stream`、`/core/error-copy`、`/tools/registry`、`/tools/builtin`、`/node/errors`、`/ui/state/progress`、`/ui/routing/route`、`/ui/components/error-boundary-copy`）。测试与被测文件同目录，改代码时测试就在旁边。
 
 其中 `src/tools/builtin.test.ts` 是注册表快照测试：工具定义按分区拆到 `src/tools/defs/` 下七个文件后，拼装顺序只由 `builtin.ts` 一处决定，漏掉一行展开符号（比如忘了 `...vendorToolsAll`）typecheck 照样通过，但品牌专区分区会整块消失。该测试锁住 34 / 26 / 24 三个数字、分区分布、id 唯一性与品牌配对。
 
@@ -689,7 +689,7 @@ npm run verify:copy     # 四类情形的提示是否都给出「原因 + 下一
 
 `verify:layout` 同样起无头 Chrome，但量的是几何：四档宽度 × 全部分区 × 折叠 / 展开 / 连接步骤弹层 / 偏好设置弹层 / 抽屉六种状态，逐一检查横向溢出、元素越界、被 `overflow-x:hidden` 裁掉、以及中心点被别的图层挡住。窄屏下另查两件事：可点区域是否 ≥ 44px，抽屉展开后点遮罩和按 Esc 能否关掉。越界判定基准取「最近裁剪祖先的右边缘」而不是视口 —— 侧边栏占掉左侧 236px 之后，按视口比会漏掉已经被裁掉的那截。它已进 CI，和 `verify:docs` 一样是构建后的一步。
 
-`verify:copy` 守的是「每句失败提示都得有用」，外加「这些提示真的出得来」。它分四段：一段把 `src/core/error-copy.ts` 真跑一遍，对「未连接设备 / 无工具结果 / 命令失败 / 设备断开」四类共 17 条真实原文逐条断言——原因非空、下一步是可执行动作、不出现「操作失败」「未知错误」这类零信息短语、原始报错必须保留；另一半静态扫源码，抓两种绕过翻译层的写法：把异常直接塞进 `<p>{error}</p>`，以及各处自己写 `instanceof Error ? x.message : String(x)`。后者本身无害，但散落十几处就意味着没人负责「翻译成下一步」这一步。第三段守的是反馈通路：数出全部 `toast(` 调用点，再确认存在订阅 `toasts` 信号的组件、该组件确实被 `App.tsx` 渲染，且应急重置页那条提前 `return` 的分支也挂上了它 —— 文案写得再清楚，没有渲染层就等于没写。第四段守的是传输进度通路，结构与第三段同构：数出 `reportProgress(` 与 `progressSink` 的真实调用点，确认存在用 `useSignal(progress)` 订阅的组件、该组件被 `App.tsx` 渲染，并额外断言「逐块进度不得再写进终端文本」—— 传输时每 64 KB 回调一次，100 MB 的包约 1600 次，`pushOutput` 的 80 ms 合并窗口会把它们拼进同一个 DOM 节点，宽度撑到几万像素。不需要浏览器，已进 CI。
+`verify:copy` 守的是「每句失败提示都得有用」，外加「这些提示真的出得来」。它分五段：一段把 `src/core/error-copy.ts` 真跑一遍，对「未连接设备 / 无工具结果 / 命令失败 / 设备断开」四类共 17 条真实原文逐条断言——原因非空、下一步是可执行动作、不出现「操作失败」「未知错误」这类零信息短语、原始报错必须保留；另一半静态扫源码，抓两种绕过翻译层的写法：把异常直接塞进 `<p>{error}</p>`，以及各处自己写 `instanceof Error ? x.message : String(x)`。后者本身无害，但散落十几处就意味着没人负责「翻译成下一步」这一步。第三段守的是反馈通路：数出全部 `toast(` 调用点，再确认存在订阅 `toasts` 信号的组件、该组件确实被 `App.tsx` 渲染，且应急重置页那条提前 `return` 的分支也挂上了它 —— 文案写得再清楚，没有渲染层就等于没写。第四段守的是传输进度通路，结构与第三段同构：数出 `reportProgress(` 与 `progressSink` 的真实调用点，确认存在用 `useSignal(progress)` 订阅的组件、该组件被 `App.tsx` 渲染，并额外断言「逐块进度不得再写进终端文本」—— 传输时每 64 KB 回调一次，100 MB 的包约 1600 次，`pushOutput` 的 80 ms 合并窗口会把它们拼进同一个 DOM 节点，宽度撑到几万像素。第五段守的是更前面一步 —— **渲染本身就炸了的时候用户看到什么**：Preact 在渲染期抛错会一路向上抛，找不到边界就把整棵子树从 DOM 卸掉，实测某个分区算错一个字段，切进去后主区域只剩一张连接提示条、切到别的分区也不恢复。所以这一段断言四环：错误边界组件实现双钩子（`getDerivedStateFromError` + `componentDidCatch`）且带重试与复位键、分区渲染确实包在里面、外壳渲染 `<App />` 时也有边界、`unhandledrejection` 与 `error` 两个全局事件都听得见；外加一条反向禁令：兜底块不得使用「出错了」这类零信息短语 —— 界面已经坏掉时，用户唯一能看到的就是这几行字。不需要浏览器，已进 CI。
 
 ### 7.3b 命令行与 MCP Server
 
@@ -1034,7 +1034,7 @@ Webroit/
 │       ├── App.tsx                 # 外壳：侧边栏 + 主区域 + 终端；应急路由分流
 │       ├── routing/                # 页面归属判定与应急页退出（URL 语义唯一真源）
 │       ├── state/                  # signal、全局动作、连接链路、传输进度降频
-│       ├── components/             # ToolCard、Terminal、PwaPrompt、ProgressStrip 等
+│       ├── components/             # ToolCard、Terminal、ErrorBoundary、PwaPrompt、ProgressStrip 等
 │       ├── views/                  # 各分区页面
 │       └── theme/                  # 设计令牌与四份样式表
 ├── NOTICE                          # 第三方组件披露
@@ -1059,13 +1059,13 @@ Webroit/
 
 | 产物 | 原始体积 | gzip | 说明 |
 |---|---|---|---|
-| `index-*.js` | 155.1 KB | 53.5 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
-| `index-*.css` | 41.7 KB | 7.5 KB | 五份样式表合并后 |
+| `index-*.js` | 156.8 KB | 53.6 KB | 首屏必需：Preact、工具注册表、全部服务与界面 |
+| `index-*.css` | 41.9 KB | 7.5 KB | 五份样式表合并后 |
 | `adb-*.js` | 71.7 KB | 21.7 KB | ADB 传输层，连接时才加载 |
 | `index.html` | 2.2 KB | 1.1 KB | 含 PWA 元信息 |
 | 图标合计 | 203.1 KB | — | 192 / 512 / maskable / apple-touch |
-| **首屏合计** | **约 199 KB** | **约 62 KB** | JS + CSS + HTML，不含图标 |
-| **全量产物** | **484 KB** | **—** | `dist/` 12 个文件 |
+| **首屏合计** | **约 201 KB** | **约 62 KB** | JS + CSS + HTML，不含图标 |
+| **全量产物** | **486 KB** | **—** | `dist/` 12 个文件 |
 
 构建耗时 0.8 秒，模块数 180。类型检查 `tsc --noEmit` 零错误。
 
@@ -1313,7 +1313,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 v0.2 之前的**技术债清单**（优先于新功能）：
 
-1. 补端到端测试 —— 纯函数层已有 181 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
+1. 补端到端测试 —— 纯函数层已有 187 个用例在 CI 里跑，但真实的 WebUSB 握手仍需人工验证。
 2. 设备报告导出与敏感信息脱敏（见 13.4）。
 3. 单文件离线版（见 7.5），或明确废弃该计划。
 
@@ -1380,7 +1380,7 @@ interface ByteSource {
 
 `collect()` 用它收参，`exec()` / `read()` 里的两边流都能直接传进来。反方向（把 `File.stream()` 交给 `sync.write()`）则用包自己的 `ReadableStream` 构造器重新包一层，接上 DOM reader 的 `pull`：运行时两者是同一个构造器，这一步是零拷贝，只是让类型对得上。
 
-现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 81 个 `.ts` / `.tsx` 文件、0 处 `any`（含 9 个测试文件）。
+现在 `npm run lint` 的 `no-explicit-any` 是**全仓生效**，`eslint.config.js` 里原先给 `driver.ts` 的例外已经删掉；`verify:docs` 也会重新数一遍 `any`，只要再出现一处就失败。全仓 83 个 `.ts` / `.tsx` 文件、0 处 `any`（含 10 个测试文件）。
 
 唯一遗留的是「UI 层不得 import `@yume-chan/adb`」这条分层约束，仍靠代码评审维持，尚未落成自定义 ESLint 规则。
 

@@ -37,6 +37,7 @@ import { BrandBadge } from '@/ui/components/BrandBadge';
 import { ToastHost } from '@/ui/components/ToastHost';
 import { SettingsSheet } from '@/ui/components/SettingsSheet';
 import { ProgressStrip } from '@/ui/components/ProgressStrip';
+import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
 
 /** SVG 图标 */
 function Icon({ path, size = 16 }: { path: string; size?: number }) {
@@ -363,7 +364,20 @@ export const App: FunctionComponent = () => {
               onShowGuide={() => setGuide(true)}
             />
           )}
-          <ModuleView module={currentModule} />
+          {/*
+            分区渲染包在错误边界里。
+
+            实测过没有它的后果：一个分区算错字段，Preact 会把整棵子树从 DOM 卸掉，
+            主区域只剩一张连接提示条，且切到别的分区也不恢复 —— 用户以为整个工具坏了。
+            边界挂在这一级 + `resetKey` 给当前分区 id：坏的那一块就地变成说明块，
+            切分区自动重试渲染，其余部分（侧边栏、终端）照常可用。
+          */}
+          <ErrorBoundary
+            label={modules.find((module) => module.id === currentModule)?.title}
+            resetKey={currentModule}
+          >
+            <ModuleView module={currentModule} />
+          </ErrorBoundary>
         </div>
 
         {/* ── 终端 ── */}

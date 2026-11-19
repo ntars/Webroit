@@ -444,6 +444,133 @@ progressInTerminal.length === 0
       '逐块进度拼进终端会被 80 ms 合并窗口塞进同一个 DOM 节点，宽度撑爆面板',
     );
 
+/* ─────────────── E. 渲染异常：出错时必须有兜底块而不是白屏 ─────────────── */
+
+/*
+ * A~D 守的都是「有结果之后」的事：提示怎么写、提示出不出得来、进度出不出得来。
+ * E 段守的是更前面的一步：**渲染本身就炸了的时候，用户看到什么**。
+ *
+ * 实况：Preact 在渲染期抛错时一路向上抛，找不到边界就把整棵子树从 DOM 卸掉。
+ * 实测向 `AppsView` 注入一次 `throw`，切进去后 `.content` 只剩一张连接提示条，
+ * 分区内容整块消失、没有一句说明；再切到「文件传输」，导航标题变了、
+ * 内容区还是那张空壳 —— 用户会以为整个工具坏了，唯一的想法是刷新或换浏览器。
+ *
+ * 所以要断言四环：
+ *   1. 存在错误边界组件，且它实现了 Preact 认的钩子（`getDerivedStateFromError` / `componentDidCatch`）
+ *   2. 分区渲染被包在里面（`App.tsx` 里 `<ErrorBoundary>` 包着 `<ModuleView`）
+ *   3. 外壳级也有边界（`main.tsx` 渲染 `<App />` 时同样包着）—— 外壳自己炸了不该是纯白页
+ *   4. 全局兜底监听在（`unhandledrejection` / `error`），否则 `void xxx()` 的失败彻底静默
+ *
+ * 外加一条反向禁令：兜底块不得绕过翻译层自己拼一句话。
+ */
+
+/** 读一份源码，并剥掉注释 —— 「源码里禁止出现某种写法」的断言必须先剥注释 */
+function codeOf(rel) {
+  const full = join(ROOT, rel);
+  if (!existsSync(full)) return null;
+  return readFileSync(full, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+const boundaryRel = 'src/ui/components/ErrorBoundary.tsx';
+const boundaryCode = codeOf(boundaryRel);
+
+if (!boundaryCode) {
+  fail('渲染错误边界', '存在', '缺失', `没有 ${boundaryRel}：渲染期抛错会整块卸载子树`);
+} else {
+  const hasDerived = /getDerivedStateFromError\s*\(/.test(boundaryCode);
+  const hasCatch = /componentDidCatch\s*\(/.test(boundaryCode);
+  if (!hasDerived || !hasCatch) {
+    fail(
+      '错误边界钩子',
+      hasDerived && hasCatch ? '齐全' : `getDerivedStateFromError ${hasDerived} / componentDidCatch ${hasCatch}`,
+      '两个都要',
+      'Preact 的 _catchError 依次看这两个钩子，只写一个在某些路径上接不住',
+    );
+  } else {
+    // 兜底块要能自己恢复：必须有重试与复位键两条路
+    const hasRetry = /onRetry|重试/.test(boundaryCode);
+    const hasResetKey = /resetKey/.test(boundaryCode);
+    if (!hasRetry || !hasResetKey) {
+      fail(
+        '错误边界可恢复',
+        `重试 ${hasRetry} / 复位键 ${hasResetKey}`,
+        '两条都要',
+        '只清 error 不让子树重建，同一个 vnode 再 diff 一遍仍会抛同样的错',
+      );
+    } else {
+      pass('渲染错误边界', `${boundaryRel}：双钩子 + 重试 + 复位键`);
+    }
+  }
+}
+
+/** 分区级：`<ErrorBoundary ...>` 与 `<ModuleView` 之间不得有 `</ErrorBoundary>` 提前闭合 */
+const appCode = codeOf('src/ui/App.tsx');
+if (!appCode) {
+  fail('分区渲染兜底', 'App.tsx 存在', '缺失');
+} else {
+  const wrapped = /<ErrorBoundary[\s\S]*?<ModuleView[\s\S]*?<\/ErrorBoundary>/.test(appCode);
+  if (!wrapped) {
+    fail(
+      '分区渲染兜底',
+      'ModuleView 包在 ErrorBoundary 里',
+      '未包裹',
+      '一个分区算错字段会让整块内容永久空白，切分区也不恢复',
+    );
+  } else if (!/resetKey\s*=/.test(appCode)) {
+    fail('分区渲染兜底', '有 resetKey', '缺 resetKey', '切分区时不会自动清错，坏的那块会一直停着');
+  } else {
+    pass('分区渲染兜底', 'ModuleView 已包，带 resetKey 自动复位');
+  }
+}
+
+/** 外壳级：main.tsx 渲染 App 时也要包一层 */
+const mainCode = codeOf('src/main.tsx');
+if (!mainCode) {
+  fail('外壳渲染兜底', 'main.tsx 存在', '缺失');
+} else if (!/<ErrorBoundary[\s\S]*?<App\s*\/>/.test(mainCode)) {
+  fail(
+    '外壳渲染兜底',
+    'App 包在 ErrorBoundary 里',
+    '未包裹',
+    '外壳自身抛错时页面是纯白，连提示都没有',
+  );
+} else {
+  pass('外壳渲染兜底', 'main.tsx 的 <App /> 已包边界');
+}
+
+/** 全局兜底：两个事件都要听 */
+if (!mainCode) {
+  fail('全局异常兜底', 'main.tsx 存在', '缺失');
+} else {
+  const hasRejection = /addEventListener\s*\(\s*['"]unhandledrejection['"]/.test(mainCode);
+  const hasError = /addEventListener\s*\(\s*['"]error['"]/.test(mainCode);
+  if (!hasRejection || !hasError) {
+    fail(
+      '全局异常兜底',
+      hasRejection && hasError ? '齐全' : `unhandledrejection ${hasRejection} / error ${hasError}`,
+      '两个都要',
+      '`void xxx()` 的失败只会走 unhandledrejection，同步回调异常只走 error',
+    );
+  } else {
+    pass('全局异常兜底', 'unhandledrejection + error 均已监听');
+  }
+}
+
+/*
+ * 反向禁令：兜底块不许说「未知错误」。
+ *
+ * 这一块是「界面已经坏了」时才出现的，此时文案质量比平时更要紧 ——
+ * 用户唯一能看到的就是这几行字。写「出了点问题」等于什么都没说。
+ */
+if (boundaryCode) {
+  const vagueInBoundary = VAGUE_PHRASES.filter((phrase) => boundaryCode.includes(phrase));
+  vagueInBoundary.length === 0
+    ? pass('兜底文案不空洞', `无零信息短语（${VAGUE_PHRASES.length} 个黑名单词均未出现）`)
+    : fail('兜底文案不空洞', vagueInBoundary, '兜底块不得使用零信息短语');
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

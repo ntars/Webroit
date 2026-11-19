@@ -391,6 +391,26 @@ textarea.input {
   }
 }
 
+/*
+ * 渲染兜底块。
+ *
+ * 它出现在「某块内容本该在这里、但渲染失败了」的位置，所以要与正常内容的
+ * 左对齐节奏一致（不是居中的 `.empty`），并在窄屏下允许按钮换行。
+ * 上限与内容区同宽，避免宽屏下拉成一整行超长文字。
+ */
+.crash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1180px;
+}
+
+.crash__note {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
 .progress {
   height: 4px;
   background: var(--bg-overlay);
