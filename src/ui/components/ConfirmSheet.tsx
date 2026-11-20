@@ -16,12 +16,30 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { confirmRequest, settleConfirm } from '@/ui/state/confirm';
 import { useSignal } from '@/ui/state/signal';
+import { useFocusTrap } from '@/ui/hooks/use-focus-trap';
 
 export const ConfirmSheet: FunctionComponent = () => {
   const request = useSignal(confirmRequest);
   const [word, setWord] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * Tab 必须被关在弹层里。
+   *
+   * 实测：没有这一层时，弹层打开后第一次 Tab 落在「取消」上，
+   * **第二次就跑到背景的侧边栏导航**。背景此刻是被遮住的另一个界面，
+   * 键盘用户会在那里迷路 —— 而这一层存在的理由正是「让人看清自己在确认什么」。
+   *
+   * `autoFocus: false`：下面的 effect 已经决定好初始焦点（有确认词落输入框，
+   * 否则落「取消」），那比「第一个可聚焦元素」更有判断力，不该被覆盖。
+   *
+   * `active` 必须跟着请求走：本组件常驻挂载、没有请求时 `return null`，
+   * 首次渲染时容器还不存在。只依赖 ref 的话 effect 会在 `ref.current === null`
+   * 时提前返回，之后弹层出现也不会再装一次 —— 看着有 hook，实际没生效。
+   */
+  useFocusTrap(sheetRef, { autoFocus: false, active: request !== null });
 
   // 换了一条请求就把上一轮的输入清掉，否则「确认」二字会带进下一次
   useEffect(() => {
@@ -57,7 +75,7 @@ export const ConfirmSheet: FunctionComponent = () => {
         if (event.target === event.currentTarget) settleConfirm(false);
       }}
     >
-      <div class="confirm-sheet">
+      <div class="confirm-sheet" ref={sheetRef}>
         {/*
           * 正文单独一层且可滚动，动作区留在外面。
           *

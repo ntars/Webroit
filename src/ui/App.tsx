@@ -39,6 +39,7 @@ import { SettingsSheet } from '@/ui/components/SettingsSheet';
 import { ProgressStrip } from '@/ui/components/ProgressStrip';
 import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
 import { ConfirmSheet } from '@/ui/components/ConfirmSheet';
+import { useFocusTrap } from '@/ui/hooks/use-focus-trap';
 
 /** SVG 图标 */
 function Icon({ path, size = 16 }: { path: string; size?: number }) {
@@ -123,6 +124,57 @@ const ConnectStrip: FunctionComponent<{
     </div>
   </div>
 );
+
+/**
+ * 连接步骤弹层。
+ *
+ * 单独抽成组件而不是写在 App 的 JSX 里，唯一原因是焦点陷阱是个 hook ——
+ * hook 不能无条件调用，而 `guide` 是条件渲染。抽出来之后这个弹层的生命周期
+ * 就是「挂载即打开、卸载即关闭」，焦点陷阱的装卸时机天然对齐。
+ *
+ * 三种退出方式与偏好面板、确认弹层统一：关闭按钮、点遮罩、按 Esc。
+ * 之前这里少了 Esc 一条 —— 同一个界面上的三个浮层有三种退出规则，
+ * 用户没法形成肌肉记忆。
+ */
+const ConnectGuide: FunctionComponent<{ onClose: () => void; onConnected: () => void }> = ({
+  onClose,
+  onConnected,
+}) => {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(sheetRef);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      class="guide-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="连接步骤"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div class="guide-sheet" ref={sheetRef}>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm guide-sheet__close"
+          onClick={onClose}
+          aria-label="关闭"
+        >
+          关闭
+        </button>
+        <ConnectPanel onConnected={onConnected} />
+      </div>
+    </div>
+  );
+};
 
 export const App: FunctionComponent = () => {
   const currentModule = useSignal(activeModule);
@@ -426,32 +478,13 @@ export const App: FunctionComponent = () => {
 
       {/* 连接步骤：从提示条按需打开，不占用主浏览路径 */}
       {guide && (
-        <div
-          class="guide-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="连接步骤"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setGuide(false);
+        <ConnectGuide
+          onClose={() => setGuide(false)}
+          onConnected={() => {
+            setGuide(false);
+            switchModule('device');
           }}
-        >
-          <div class="guide-sheet">
-            <button
-              type="button"
-              class="btn btn--ghost btn--sm guide-sheet__close"
-              onClick={() => setGuide(false)}
-              aria-label="关闭"
-            >
-              关闭
-            </button>
-            <ConnectPanel
-              onConnected={() => {
-                setGuide(false);
-                switchModule('device');
-              }}
-            />
-          </div>
-        </div>
+        />
       )}
     </div>
   );

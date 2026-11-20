@@ -15,11 +15,12 @@
  */
 
 import { type FunctionComponent, type ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { type ThemeMode, DEFAULT_PREFERENCES } from '@/core/storage';
 import { preferences, resetAllPreferences, updatePreferences } from '@/ui/state/app-state';
 import { useSignal } from '@/ui/state/signal';
+import { useFocusTrap } from '@/ui/hooks/use-focus-trap';
 
 /** 主题三档的文案 */
 const THEMES: [ThemeMode, string][] = [
@@ -133,6 +134,18 @@ const NumberField: FunctionComponent<{
 
 export const SettingsSheet: FunctionComponent<{ onClose: () => void }> = ({ onClose }) => {
   const prefs = useSignal(preferences);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * 焦点必须被关在面板里。
+   *
+   * 实测（`scripts/probe-focus.mjs`）：没有这一层时，面板打开后第一次 Tab
+   * 就落在背景的顶栏按钮上，走完面板内 10 个控件后又一路沿侧边栏跑。
+   * 面板写了 `aria-modal="true"`，行为上却不是模态 —— 键盘用户等于在
+   * 和一个被遮住的界面交互。关闭时也要把焦点还回齿轮按钮，
+   * 否则想接着调偏好得从页面开头 Tab 一遍。
+   */
+  useFocusTrap(sheetRef);
 
   // Esc 关闭：与连接步骤弹层、窄屏抽屉保持同一套习惯
   useEffect(() => {
@@ -153,7 +166,7 @@ export const SettingsSheet: FunctionComponent<{ onClose: () => void }> = ({ onCl
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div class="settings-sheet">
+      <div class="settings-sheet" ref={sheetRef}>
         <header class="settings-head">
           <h2 class="settings-head__title">偏好设置</h2>
           <button type="button" class="btn btn--ghost btn--sm" onClick={onClose} aria-label="关闭设置">

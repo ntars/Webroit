@@ -1226,6 +1226,80 @@ if (!marksSkipped) {
   pass('未执行与失败分开', '服务层标 skipped、播报层单列、零信息短语不回流');
 }
 
+/* ─────────────── I. 浮层必须真的锁住焦点 ─────────────── */
+
+/*
+ * 这一段守的是「模态语义是否名副其实」。
+ *
+ * 三处浮层（偏好面板、确认弹层、连接步骤）都写着 `aria-modal="true"`，
+ * 但实测（`scripts/probe-focus.mjs`）发现行为上不是模态：偏好面板打开后
+ * 第一次 Tab 落在背景的顶栏按钮上，走完面板内 10 个控件后又一路沿侧边栏跑；
+ * 确认弹层第二次 Tab 就跑到背景；关掉面板后焦点落在侧边栏的「连接设备」上，
+ * 想接着调偏好得从页面开头 Tab 一遍。对键盘与读屏用户来说，
+ * 「弹层盖住屏幕」这件事从来没发生过 —— 他们一直在和被遮住的另一个界面交互。
+ *
+ * 断言四环，正反各两条：
+ *   1. 陷阱实现存在，且 `Tab` 的默认行为真的被接管（只加监听不 preventDefault
+ *      等于看着拦住了、实际浏览器照样往下跳）
+ *   2. 关闭时把焦点还回打开前的元素（只搬进去不还回去，等于把用户丢在别处）
+ *   3. 三处浮层都接了这个 hook —— 少接一处，那一处就是「声明了模态却不是模态」
+ *   4. 反面：hook 的依赖数组必须含 `active`。确认弹层常驻挂载、没有请求时
+ *      `return null`，只依赖 ref 时 effect 会在 `ref.current === null` 时提前
+ *      返回且不再重跑，看着装了实际没装（本轮正是被这条卡住过一次）
+ */
+const trapRel = 'src/ui/hooks/use-focus-trap.ts';
+const trapCode = codeOf(trapRel);
+
+if (!trapCode) {
+  fail('浮层焦点陷阱', trapRel, '缺失', '弹层只声明 aria-modal 而不锁焦点，键盘用户仍在操作背景');
+} else if (!/preventDefault\s*\(\s*\)/.test(trapCode)) {
+  fail(
+    '浮层焦点陷阱',
+    'Tab 的默认行为被接管',
+    '无 preventDefault',
+    '只加监听不拦默认行为，浏览器照样把焦点送出弹层',
+  );
+} else if (!/previous\s*\.\s*focus\s*\(/.test(trapCode)) {
+  fail(
+    '浮层焦点陷阱',
+    '关闭时把焦点还回原处',
+    '未还原',
+    '焦点搬进去却不再搬回来，用户想接着调偏好得从页面开头 Tab 一遍',
+  );
+} else if (!/\[ref,\s*autoFocus,\s*active\]/.test(trapCode)) {
+  fail(
+    '浮层焦点陷阱',
+    '依赖数组含 active',
+    '缺 active',
+    '常驻挂载的弹层首帧容器还不存在，effect 提前返回后再也不会重装',
+  );
+} else {
+  pass('浮层焦点陷阱', '接管 Tab 默认行为 + 关闭还原焦点 + active 触发重装');
+}
+
+/** 三处浮层各自的容器 ref 与 hook 调用，逐个确认真的接上了 */
+const TRAP_HOSTS = [
+  ['src/ui/components/SettingsSheet.tsx', '偏好面板'],
+  ['src/ui/components/ConfirmSheet.tsx', '确认弹层'],
+  ['src/ui/App.tsx', '连接步骤弹层'],
+];
+const trapHosts = TRAP_HOSTS.map(([rel, label]) => {
+  const code = codeOf(rel) ?? '';
+  return { label, uses: /useFocusTrap\s*\(/.test(code), ref: /ref=\{sheetRef\}/.test(code) };
+});
+const trapMissing = trapHosts.filter((host) => !host.uses || !host.ref);
+
+if (trapMissing.length > 0) {
+  fail(
+    '三处浮层都锁焦点',
+    trapMissing.map((host) => host.label).join('、'),
+    '未接入',
+    '写了 useFocusTrap 却没把 ref 挂到容器上（或反之），焦点陷阱无处生效',
+  );
+} else {
+  pass('三处浮层都锁焦点', '偏好面板 / 确认弹层 / 连接步骤弹层的容器都挂着 ref 并调了 hook');
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);
