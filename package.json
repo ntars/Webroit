@@ -24,7 +24,8 @@
     "verify:cancel": "node scripts/probe-cancel.mjs",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "verify:focus": "node scripts/probe-focus.mjs"
+    "verify:focus": "node scripts/probe-focus.mjs",
+    "verify:audit": "node scripts/probe-audit.mjs"
   },
   "dependencies": {
     "@yume-chan/adb": "^2.6.4",

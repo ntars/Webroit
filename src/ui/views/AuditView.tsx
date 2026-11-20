@@ -16,8 +16,11 @@ import { type FunctionComponent } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { auditLog, type AuditEntry } from '@/core/audit';
+import { messageOf } from '@/core/error-copy';
 import { MODULES } from '@/tools/registry';
-import { toast } from '@/ui/state/app-state';
+import { preferences, toast } from '@/ui/state/app-state';
+import { askConfirm, CONFIRM_WORD, gateFor } from '@/ui/state/confirm';
+import { useSignal } from '@/ui/state/signal';
 
 /** 状态对应的展示文案与颜色 */
 const STATUS_META: Record<AuditEntry['status'], { label: string; tone: string }> = {
@@ -44,6 +47,14 @@ function formatTime(at: number): string {
 export const AuditView: FunctionComponent = () => {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState<'all' | 'error'>('all');
+  /*
+   * 订阅偏好而不是直接读 `preferences.value`。
+   *
+   * 「高危二次确认」开关决定清空要不要手打确认词。直接读 `.value` 只在渲染那一刻
+   * 取值，用户在偏好面板里改了开关、回到这一页仍读旧值 —— 门槛与实际设置不一致，
+   * 而这正是治理层最不该出现的偏差。
+   */
+  const prefs = useSignal(preferences);
 
   useEffect(() => {
     // subscribe 会立即回填一次当前数据，不需要额外初读
@@ -69,13 +80,53 @@ export const AuditView: FunctionComponent = () => {
   };
 
   const clearAll = async () => {
-    const ok = window.confirm(
-      `将删除全部 ${entries.length} 条操作记录。\n\n` +
-        '这不会撤销任何设备改动，只是清掉这份本地日志。删除后无法恢复，确定继续？',
-    );
+    /*
+     * 清空走全站同一个确认门，不用 `window.confirm`。
+     *
+     * 原实现是全仓唯一一处浏览器原生对话框。它有四个具体坏处：
+     * 1. 样式不可控 —— 深色主题下弹出一张系统白框，与本项目任何一处浮层都不同源；
+     * 2. 全屏 / PWA 独立窗口下可能被浏览器拦成「页面已阻止此对话框」而不显示；
+     * 3. 没有手打确认词的余地，一次误点就抹掉全部追溯线索；
+     * 4. **静态校验拦不住** —— `verify:copy` F 段的反向禁令查的是
+     *    「视图直调变更服务方法」，`window.confirm` 不是服务调用，历轮全绿。
+     *
+     * 清空不可逆且不可恢复，按 risk 3 处理：不受「高危二次确认」偏好开关影响，
+     * 要求手打「确认」二字。
+     */
+    const gate = gateFor(3, prefs.confirmDangerous);
+    const ok = await askConfirm({
+      title: `清空全部 ${entries.length} 条操作记录`,
+      reason:
+        '这份日志是本机唯一的「改过什么」追溯线索，清空后无法恢复。它不会撤销任何设备改动，只是删掉记录。',
+      detail: entries.length > 0 ? '清空后会留下一条「已清空」记录，标出这条断层。' : undefined,
+      confirmLabel: '清空',
+      word: gate.needsWord ? CONFIRM_WORD : undefined,
+    });
     if (!ok) return;
-    await auditLog.clear();
-    toast('info', '操作记录已清空');
+
+    try {
+      const removed = await auditLog.clear({
+        module: 'audit',
+        action: 'audit.clear',
+        label: `清空操作记录（${entries.length} 条）`,
+      });
+      toast('info', `已清空 ${removed} 条操作记录`);
+    } catch (caught) {
+      /*
+       * 这里刻意不走 `explainError()`。
+       *
+       * 那个翻译器面向的是**设备**异常，兜底会让人「查数据线、重新连接」——
+       * 而清空审计只动本机 IndexedDB，与数据线无关。套上去等于给出一条
+       * 完全不解决问题的下一步。本地存储失败的出口只有一条：换个浏览器环境重试。
+       *
+       * 取原文交给 `messageOf()` 而不是手写 `instanceof Error ? ... : String(...)` ——
+       * 后者是 `verify:copy` B 段明令禁止的写法，正是因为散落各处就没人负责翻译。
+       */
+      toast(
+        'error',
+        `清空失败：${messageOf(caught)}。本机存储可能处于隐私模式或配额已满，可先用「导出 JSON」留一份`,
+      );
+    }
   };
 
   return (

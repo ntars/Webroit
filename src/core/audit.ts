@@ -109,7 +109,24 @@ export class AuditLog {
   }
 
   #emit(): void {
-    for (const listener of this.#listeners) listener(this.#entries);
+    /*
+     * 发副本，不是内部数组本身。
+     *
+     * 这个数组是订阅者的渲染依据。`record()` 用 `push`、`update()` 用
+     * `Object.assign`，两者都是就地改 —— 内部引用自始至终不变。直接把
+     * `this.#entries` 发出去，订阅方（`AuditView` 的 `setEntries`）拿到的是
+     * 同一个引用，Preact 按 `Object.is` 判等后跳过重渲染，表现是
+     * **新记录写进去了、列表纹丝不动**。
+     *
+     * 实测（临时探针）：挂载后再记一条，列表从 2 条仍是 2 条；
+     * 同一订阅者前后两次拿到的数组 `===` 成立。清空之所以"看起来生效"，
+     * 只是因为 `clear()` 恰好赋了新数组。
+     *
+     * 复制一次的成本是 500 个元素上限的一次浅拷贝，可以忽略；
+     * 换来的是「订阅者拿到的快照永远与此刻一致」这条不变量。
+     */
+    const snapshot = this.#entries.slice();
+    for (const listener of this.#listeners) listener(snapshot);
   }
 
   /** 当前全部记录（副本，防止外部改动内部数组） */
@@ -170,17 +187,48 @@ export class AuditLog {
     }
   }
 
-  /** 清空全部记录 */
-  async clear(): Promise<void> {
+  /**
+   * 清空全部记录，并留下一条「清空」自述。
+   *
+   * 为什么清空要自动留痕，而不是让调用方自己补一条：
+   * 这一页存在的唯一理由是「改过什么能追溯」。一份可以被无声抹掉的日志，
+   * 抹掉之后与「从来没操作过」长得一模一样 —— 而这两种情况的含义完全相反。
+   * 所以「清空必须留下痕迹」是日志自身的不变量，收在这里实现一次；
+   * 指望每个调用点记得补一条，漏一个就等于给了个洗白入口。
+   *
+   * @returns 被清掉的条数（不含自述那条）
+   */
+  async clear(note?: { module: string; action: string; label: string }): Promise<number> {
+    const removed = this.#entries.length;
     this.#entries = [];
     this.#emit();
-    if (!this.#db) return;
-    try {
-      const tx = this.#db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).clear();
-    } catch {
-      // 忽略
+
+    /*
+     * 先清盘，再写自述 —— 顺序不能反。
+     *
+     * `record()` 内部会把新记录 `put` 进 IndexedDB。若先记自述再 `clear()`，
+     * 那条自述会被紧接着的清库一起抹掉，刷新页面后断层依旧无法解释。
+     */
+    if (this.#db) {
+      try {
+        const tx = this.#db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).clear();
+      } catch {
+        // 忽略：盘上清不掉不影响内存里的结论
+      }
     }
+
+    if (note) {
+      this.record({
+        module: note.module,
+        action: note.action,
+        label: note.label,
+        commands: [],
+        status: 'ok',
+      });
+    }
+
+    return removed;
   }
 
   /**

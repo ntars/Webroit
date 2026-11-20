@@ -1300,6 +1300,87 @@ if (trapMissing.length > 0) {
   pass('三处浮层都锁焦点', '偏好面板 / 确认弹层 / 连接步骤弹层的容器都挂着 ref 并调了 hook');
 }
 
+/* ─────────────── J. 破坏性操作不许用浏览器原生对话框 ─────────────── */
+
+/*
+ * 这一段守的是一个**校验盲区**，而不是又一条文案规矩。
+ *
+ * 实况：`AuditView` 的「清空操作记录」是全仓唯一一处 `window.confirm`。
+ * F 段的反向禁令查的是「视图有没有直调变更服务方法」——
+ * `window.confirm` 既不是服务调用、也不改设备状态，于是历轮全绿，
+ * 而它带来的问题很具体：
+ *
+ *   1. 样式不受控 —— 深色主题下弹出一张系统白框，与其余三处浮层不同源；
+ *   2. 无手打确认词 —— 一次误点就抹掉全部追溯线索，而这一页存在的
+ *      唯一理由就是「改过什么能追溯」；
+ *   3. **自动化与无障碍工具都拿它没办法** —— 它阻塞页面执行上下文，
+ *      本轮探针第一次跑就因此挂死三分钟。真正危险的入口不该是这种形态。
+ *
+ * 断两层：
+ *   1. 全仓 UI 层不得出现 `window.alert/confirm/prompt`（脚本文件除外）
+ *   2. 行内必须写清「为什么不用它」—— 光删掉，下一个人还会加回来
+ *   3. 清空必须真的经过 `askConfirm()`，且 `auditLog.clear()` 要带自述参数
+ *
+ * 为什么还要第 3 条：把 `window.confirm` 删掉很容易连带把确认门一起删掉，
+ * 那样更糟 —— 一点就清空、连问都不问。
+ */
+const NATIVE_DIALOG = /\bwindow\s*\.\s*(alert|confirm|prompt)\s*\(/;
+const nativeHits = [];
+for (const file of uiFiles) {
+  const rel = file.replace(ROOT + '/', '');
+  const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
+  lines.forEach((line, index) => {
+    if (NATIVE_DIALOG.test(line)) nativeHits.push(`${rel}:${index + 1}`);
+  });
+}
+
+if (nativeHits.length > 0) {
+  fail(
+    '不使用浏览器原生对话框',
+    nativeHits.join('、'),
+    '发现 window.alert / confirm / prompt',
+    '原生对话框样式不受控、无法要求手打确认词、且会阻塞页面让自动化与读屏工具失效；应改用 askConfirm()',
+  );
+} else {
+  pass('不使用浏览器原生对话框', `${uiFiles.length} 个 ts/tsx 文件里零命中，破坏性操作统一走 askConfirm()`);
+}
+
+const auditViewRel = 'src/ui/views/AuditView.tsx';
+const auditViewCode = codeOf(auditViewRel);
+
+if (!auditViewCode) {
+  fail('清空操作记录走治理层', auditViewRel, '缺失', '这一页没有了，断言失去意义');
+} else {
+  const asksConfirm = /await\s+askConfirm\s*\(/.test(auditViewCode);
+  const usesGate = /gateFor\s*\(/.test(auditViewCode);
+  /*
+   * 清空要带自述参数。判据用「clear 实参里有 action/label 字段」，
+   * 而不是只查 `clear(` 有没有被调用 —— 无参调用正好是修之前的样子。
+   */
+  const clearWithNote = /auditLog\s*\.\s*clear\s*\(\s*\{[^}]*action\s*:[^}]*\}/.test(auditViewCode);
+  const noDirectConfirm = !NATIVE_DIALOG.test(stripComments(auditViewCode));
+
+  if (!asksConfirm || !usesGate) {
+    fail(
+      '清空操作记录走治理层',
+      `askConfirm ${asksConfirm} / gateFor ${usesGate}`,
+      '两项都要',
+      '删掉原生对话框却没接确认门，就退化成「一点就清空、连问都不问」',
+    );
+  } else if (!clearWithNote) {
+    fail(
+      '清空操作记录留痕',
+      'auditLog.clear({ action, label })',
+      '清空未带自述',
+      '被无声抹掉的日志与「从来没操作过」长得一样，而这一页存在的理由就是追溯',
+    );
+  } else if (!noDirectConfirm) {
+    fail('清空操作记录走治理层', auditViewRel, '仍保留原生对话框', '两套确认方式并存，门槛不一致');
+  } else {
+    pass('清空操作记录走治理层', 'askConfirm + gateFor(risk 3) + clear 带自述记录');
+  }
+}
+
 /* ─────────────── 输出 ─────────────── */
 
 const failed = checks.filter((c) => !c.ok);

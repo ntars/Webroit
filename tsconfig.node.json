@@ -2,7 +2,7 @@
   "//": "命令行侧的独立编译配置。",
   "//2": "主 tsconfig 面向浏览器（lib 含 DOM、types 只给 vite/client），Node 侧要 Buffer / process / node: 模块，两者不能共用一份。",
   "//3": "刻意把 services / tools / core 一起纳入：这些是两侧共用的层，只要它们悄悄用了 document、localStorage 之类的浏览器 API，这里就会报错。这是保证「共享层真的可共享」的唯一可靠手段。",
-  "//4": "exclude 里的四个文件是浏览器专属实现（WebUSB 驱动、PWA 注册、本地偏好存储、审计落盘），Node 侧不引用它们，也就无需在此检查。",
+  "//4": "exclude 里的文件是浏览器专属实现（WebUSB 驱动、PWA 注册、本地偏好存储、审计落盘），Node 侧不引用它们，也就无需在此检查。audit.test.ts 一并排除：它 import 的正是 audit.ts，留着会把那个浏览器专属模块重新拉回 node 项目，报出一片 Cannot find name 'indexedDB'。",
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
@@ -37,6 +37,7 @@
     "src/core/snapshot-indexeddb.ts",
     "src/core/pwa.ts",
     "src/core/storage.ts",
-    "src/core/audit.ts"
+    "src/core/audit.ts",
+    "src/core/audit.test.ts"
   ]
 }
