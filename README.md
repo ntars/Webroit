@@ -1420,8 +1420,11 @@ interface ByteSource {
 | 路径 | 许可 |
 |---|---|
 | `src/services/` `src/tools/` `src/core/transport/` | Apache-2.0 |
-| `src/core/`（其余）、`src/ui/`、`src/node/`、`bin/`、`scripts/` | MIT |
+| `src/core/`（其余）、`src/ui/`、`src/node/`、`scripts/`、`skill/`、`public/` | MIT |
+| `index.html` `dev-preview.html` `vite.config.ts` `tsconfig*.json` `package.json` `.github/` | MIT |
 | 品牌名称、Logo 与界面设计 | 保留所有权利 |
+
+**默认归属**：上表未列出的本项目自研文件，一律适用根 `LICENSE`（Apache-2.0）。本仓库没有 `bin/` 目录（命令行入口是 `src/node/cli.ts`，产物不入库）；逐路径路由与再分发须保留的文件清单见 [LICENSING.md](LICENSING.md)。
 
 ```
 Copyright (c) 2026 星玖工作室 Ntarstudio

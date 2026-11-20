@@ -414,7 +414,8 @@ POSSIBILITY OF SUCH DAMAGE.
 --------------------------------------------------------------------------------
 
 Webroit 原创代码按目录分层授权，只使用 Apache-2.0 与 MIT 两种宽松许可证。
-分层路由表见仓库根目录 LICENSE，许可全文见 LICENSES/ 目录。
+分层路由表见仓库根目录 [LICENSING.md](LICENSING.md)，许可全文见根目录 `LICENSE`（Apache-2.0）与 `LICENSE-MIT`（MIT）。
+本仓库没有 `LICENSES/` 目录。
 
     Copyright (c) 2026 星玖工作室 Ntarstudio
 

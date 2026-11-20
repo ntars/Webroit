@@ -4,7 +4,8 @@
   "version": "0.1.0-dev",
   "type": "module",
   "description": "插上数据线，打开网页，就能玩机 —— 浏览器内安卓玩机工具箱",
-  "license": "Apache-2.0",
+  "license": "(Apache-2.0 AND MIT)",
+  "licenseNote": "按目录分层：src/services src/tools src/core/transport 为 Apache-2.0；其余为 MIT。逐路径路由见 LICENSING.md。",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
