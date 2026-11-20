@@ -23,11 +23,18 @@ import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
 import { ErrorNotice } from '@/ui/components/ErrorNotice';
 import { reportBatch } from '@/ui/state/actions';
+import { indexOutcomes, type RowMark, type RowStatus } from '@/ui/state/batch-report';
 import { disableVendor, enableVendor } from '@/ui/state/mutations';
 
 interface Props {
   tools: Tool[];
 }
+
+/** 行级标记的展示文案，与 `RowStatus` 一一对应 */
+const MARK_LABEL: Record<RowStatus, string> = {
+  failed: '失败',
+  skipped: '未执行',
+};
 
 export const VendorView: FunctionComponent<Props> = ({ tools }) => {
   const current = useSignal(services);
@@ -37,6 +44,8 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /** 上一次操作里没成功的组件，与 `AppsView` 同一套行级标记 */
+  const [marks, setMarks] = useState<Map<string, RowMark>>(() => new Map());
 
   const meta = current ? vendorMeta(current.vendor) : null;
 
@@ -49,6 +58,13 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
       setItems(result);
       // 默认不勾选任何项 —— 停用是变更操作，不该有默认选中
       setSelected(new Set());
+      // 重新扫描等于重新对账，只保留仍在清单里的标记
+      setMarks((prev) => {
+        if (prev.size === 0) return prev;
+        const alive = new Set(result.map((item) => item.package));
+        const next = new Map([...prev].filter(([name]) => alive.has(name)));
+        return next.size === prev.size ? prev : next;
+      });
     } catch (caught) {
       setError(explainError(caught));
     } finally {
@@ -108,15 +124,15 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
       if (outcome.status === 'cancelled') return;
 
       // 同 AppsView：交完整结果数组，失败项的名称与原文才有出口
-      reportBatch(
-        outcome.value.map((item) => ({
-          target: item.package,
-          ok: item.ok,
-          message: item.message,
-          skipped: item.skipped,
-        })),
-        action === 'enable' ? '恢复' : '停用',
-      );
+      const normalized = outcome.value.map((item) => ({
+        target: item.package,
+        ok: item.ok,
+        message: item.message,
+        skipped: item.skipped,
+      }));
+      reportBatch(normalized, action === 'enable' ? '恢复' : '停用');
+      // 失败与未执行落在行上，用户不必靠包名去清单里翻找
+      setMarks((prev) => indexOutcomes(normalized, prev));
       setSelected(new Set());
       await scan();
     } catch (caught) {
@@ -175,6 +191,21 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
           title="扫描系统组件失败"
           onRetry={error.retry ? () => void scan() : undefined}
         />
+      )}
+
+      {marks.size > 0 && (
+        <div class="apps__marks-bar">
+          <span class="apps__marks-tip">
+            上次操作有 {marks.size} 个没成功，清单内已标出原因
+          </span>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm"
+            onClick={() => setMarks(new Map())}
+          >
+            清除标记
+          </button>
+        </div>
       )}
 
       {selected.size > 0 && (
@@ -249,39 +280,58 @@ export const VendorView: FunctionComponent<Props> = ({ tools }) => {
                   <span class="vendor-group__count">{list.length} 项</span>
                 </div>
                 <div class="vendor-list">
-                  {list.map((item) => (
-                    <label
-                      key={item.package}
-                      class="vendor-item"
-                      data-disabled={item.disabled}
-                      data-missing={!item.installed}
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={!item.installed || item.disabled}
-                        checked={selected.has(item.package)}
-                        onChange={() => toggle(item.package)}
-                      />
-                      <div class="vendor-item__body">
-                        <div class="vendor-item__title-row">
-                          <span class="vendor-item__title">{item.label}</span>
-                          {item.recommended && (
-                            <span class="tag tag--accent">推荐</span>
-                          )}
-                          {item.disabled && (
-                            <span class="tag tag--warning">已停用</span>
-                          )}
-                          {!item.installed && (
-                            <span class="tag tag--neutral">未安装</span>
+                  {list.map((item) => {
+                    const mark = marks.get(item.package);
+                    return (
+                      <label
+                        key={item.package}
+                        class="vendor-item"
+                        data-disabled={item.disabled}
+                        data-missing={!item.installed}
+                        data-outcome={mark?.status}
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={!item.installed || item.disabled}
+                          checked={selected.has(item.package)}
+                          onChange={() => toggle(item.package)}
+                        />
+                        <div class="vendor-item__body">
+                          <div class="vendor-item__title-row">
+                            <span class="vendor-item__title">{item.label}</span>
+                            {item.recommended && (
+                              <span class="tag tag--accent">推荐</span>
+                            )}
+                            {item.disabled && (
+                              <span class="tag tag--warning">已停用</span>
+                            )}
+                            {!item.installed && (
+                              <span class="tag tag--neutral">未安装</span>
+                            )}
+                            {/*
+                              * 未成功标记放在最后：前面三个是「设备现状」，
+                              * 这一个说的是「上一次操作的结果」，语义不同层，
+                              * 排在一起会让人以为停用失败等于状态未知。
+                              */}
+                            {mark && (
+                              <span
+                                class={
+                                  mark.status === 'skipped' ? 'tag tag--neutral' : 'tag tag--danger'
+                                }
+                                title={mark.message || '连接中断，这条命令没有发出去'}
+                              >
+                                {MARK_LABEL[mark.status]}
+                              </span>
+                            )}
+                          </div>
+                          <div class="vendor-item__package">{item.package}</div>
+                          {item.impact && (
+                            <div class="vendor-item__impact">影响：{item.impact}</div>
                           )}
                         </div>
-                        <div class="vendor-item__package">{item.package}</div>
-                        {item.impact && (
-                          <div class="vendor-item__impact">影响：{item.impact}</div>
-                        )}
-                      </div>
-                    </label>
-                  ))}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </section>

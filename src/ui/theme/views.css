@@ -498,6 +498,61 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/*
+ * 未成功项的行级标记。
+ *
+ * 三种强度，对应三种该做的事：
+ *   失败   —— 命令到了设备但被拒绝，左侧一道红边 + 淡红底，去查原因再重试
+ *   未执行 —— 命令压根没发出去（断线），不染红底，只一道灰边，别引导人去查设备
+ * 两者都不改文字颜色：行内主体是包名与状态，红了反而读不清。
+ */
+.apps__list tr[data-outcome='failed'],
+.vendor-item[data-outcome='failed'] {
+  background: var(--danger-subtle);
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+
+.apps__list tr[data-outcome='skipped'],
+.vendor-item[data-outcome='skipped'] {
+  box-shadow: inset 2px 0 0 var(--border-strong);
+}
+
+/* 悬停时不要把上面那道标记边盖掉 */
+.apps__list tr[data-outcome='failed']:hover,
+.vendor-item[data-outcome='failed']:hover {
+  background: var(--danger-subtle);
+}
+
+/* 失败行的状态列：标记在前，原状态在后，原状态降一级不抢注意力 */
+.apps__state-note {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* 只看未成功的工具条：与批量操作条同高，不跳布局 */
+.apps__marks-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.apps__marks-bar .btn[data-active='true'] {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+}
+
+.apps__marks-tip {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+}
+
 /* ─────────────── 电池 ─────────────── */
 
 .chart {

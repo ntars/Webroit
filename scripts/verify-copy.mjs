@@ -907,6 +907,46 @@ if (reportCalls.length === 0) {
 }
 
 /*
+ * 环 2b：未成功项必须回到列表里看得见。
+ *
+ * G 段前面几环守的是「说得清」：摘要点了名、明细逐条进了终端。但用户读完
+ * 终端接下来的动作是**回列表里找到那几行**。300 行的列表、只有几个失败项、
+ * 提示条 5 秒后消失 —— 播报再完整，也停在「你刚才看见过一眼」。
+ *
+ * T-021 之前连这条都没有：`reportBatch` 播完就结束，行上什么也不留。
+ * 断言三环，缺一不可：
+ *   1. `batch-report.ts` 真的导出折算函数（而不是视图各写一遍 filter）
+ *   2. 两个批量视图都消费它（只接一个 = 另一个入口仍然瞎）
+ *   3. 行上有 `data-outcome` 属性（值算出来了但没落到 DOM，等于没做）
+ */
+{
+  const marksFn = /export function indexOutcomes\s*\(/.test(batchReportCode ?? '');
+  const consumers = ['src/ui/views/AppsView.tsx', 'src/ui/views/VendorView.tsx'];
+  const missingConsumers = consumers.filter((rel) => {
+    const text = codeOf(rel) ?? '';
+    return !/indexOutcomes\s*\(/.test(text) || !/data-outcome=\s*\{/.test(text);
+  });
+
+  if (!marksFn) {
+    fail(
+      '未成功项有行级标记',
+      'batch-report.ts 导出 indexOutcomes',
+      '缺失',
+      '结果数组播完就丢，用户得拿包名回 300 行列表里逐个数回来找',
+    );
+  } else if (missingConsumers.length > 0) {
+    fail(
+      '未成功项落到行上',
+      missingConsumers.join('、'),
+      '两个批量视图都要 indexOutcomes + data-outcome',
+      '只在提示条里说「失败 2 个」，界面上一行都看不出来是哪两个',
+    );
+  } else {
+    pass('未成功项有行级标记', 'indexOutcomes 折算 + 两个视图 data-outcome 落地');
+  }
+}
+
+/*
  * 环 3：反向禁令 —— 「见下方」后面必须跟一个真实区域名。
  *
  * 这句话本身没有错，错在它指的东西当时并不存在。首版把「原因见下方」整个

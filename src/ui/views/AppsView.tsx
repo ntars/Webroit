@@ -22,6 +22,7 @@ import { ToolCard } from '@/ui/components/ToolCard';
 import { NeedsDevice } from '@/ui/components/NeedsDevice';
 import { ErrorNotice } from '@/ui/components/ErrorNotice';
 import { reportBatch } from '@/ui/state/actions';
+import { indexOutcomes, type RowMark, type RowStatus } from '@/ui/state/batch-report';
 import { disableApp, disableApps, enableApp, enableApps, stopApp, uninstallApps } from '@/ui/state/mutations';
 
 interface Props {
@@ -38,6 +39,12 @@ const ACTION_DONE: Record<'enable' | 'disable' | 'forceStop' | 'uninstall', stri
   uninstall: '已卸载',
 };
 
+/** 行级标记的展示文案，与 `RowStatus` 一一对应 */
+const MARK_LABEL: Record<RowStatus, string> = {
+  failed: '失败',
+  skipped: '未执行',
+};
+
 export const AppsView: FunctionComponent<Props> = ({ tools }) => {
   const current = useSignal(services);
   const [entries, setEntries] = useState<PackageEntry[]>([]);
@@ -48,13 +55,34 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  /*
+   * 上一次操作里没成功的行。
+   *
+   * 存在理由：播报把「哪几个失败了」写进提示条与终端，但用户接下来要做的
+   * 是回到列表里找到那几行 —— 300 行列表 + 5 秒后消失的 toast，等于让用户
+   * 拿包名去搜索框里逐个捞。所以把结果折成行级标记留在原地，直到下一次读取。
+   */
+  const [marks, setMarks] = useState<Map<string, RowMark>>(() => new Map());
+  const [onlyFailed, setOnlyFailed] = useState(false);
 
   const load = async () => {
     if (!current || loading) return;
     setLoading(true);
     setError(null);
     try {
-      setEntries(await current.apps.listWithState());
+      const list = await current.apps.listWithState();
+      setEntries(list);
+      /*
+       * 标记跟着行走：卸载成功的包不再有行，标记留着也无处显示。
+       * 只清掉「行已不存在」的那几条 —— 保留仍在列表里的失败标记，
+       * 否则批量卸载后 `await load()` 会把刚设好的标记一起抹掉。
+       */
+      setMarks((prev) => {
+        if (prev.size === 0) return prev;
+        const alive = new Set(list.map((entry) => entry.name));
+        const next = new Map([...prev].filter(([name]) => alive.has(name)));
+        return next.size === prev.size ? prev : next;
+      });
     } catch (caught) {
       setError(explainError(caught));
     } finally {
@@ -70,13 +98,14 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
   const filtered = useMemo(() => {
     const key = keyword.trim().toLowerCase();
     return entries.filter((entry) => {
+      if (onlyFailed && !marks.has(entry.name)) return false;
       if (filter === 'third' && entry.system) return false;
       if (filter === 'system' && !entry.system) return false;
       if (filter === 'disabled' && !entry.disabled) return false;
       if (key && !entry.name.toLowerCase().includes(key)) return false;
       return true;
     });
-  }, [entries, filter, keyword]);
+  }, [entries, filter, keyword, onlyFailed, marks]);
 
   const toggle = (name: string) => {
     setSelected((prev) => {
@@ -118,9 +147,15 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
             : entry,
         ),
       );
+      // 这一行刚成功，上一轮留下的失败标记要撤掉，否则会一直挂着
+      setMarks((prev) => indexOutcomes([{ target: name, ok: true, message: '' }], prev));
       toast('success', `${name} ${ACTION_DONE[action]}`);
     } catch (caught) {
       const explained = explainError(caught);
+      // 单条失败同样要落在行上：用户点的是这一行，眼睛也还停在这一行
+      setMarks((prev) =>
+        indexOutcomes([{ target: name, ok: false, message: explained.reason }], prev),
+      );
       toast('error', explained.reason);
     } finally {
       setBusy(null);
@@ -162,6 +197,19 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
       const succeeded = new Set(
         outcome.value.filter((item) => item.success).map((item) => item.name),
       );
+      /*
+       * 失败与未执行落在行上（T-021）。
+       *
+       * 与 success 分开处理：成功项既要改本地状态，也要把可能残留的旧标记撤掉；
+       * 未成功项只加标记、不动状态 —— 界面与设备保持一致，失败的还是原样。
+       */
+      const normalized = outcome.value.map((item) => ({
+        target: item.name,
+        ok: item.success,
+        message: item.message,
+        skipped: item.skipped,
+      }));
+      setMarks((prev) => indexOutcomes(normalized, prev));
       setEntries((prev) =>
         prev.map((entry) => {
           // 失败的项不改本地状态 —— 让界面与设备保持一致
@@ -248,6 +296,38 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
           </button>
         </div>
 
+        {/*
+          * 只看未成功：失败与未执行项的唯一出口。
+          *
+          * 只在真有未成功项时出现 —— 全成功时给一个点了没反应的开关，
+          * 等于让用户怀疑自己漏看了什么。
+          */}
+        {marks.size > 0 && (
+          <div class="apps__marks-bar">
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              data-active={onlyFailed}
+              onClick={() => setOnlyFailed((prev) => !prev)}
+            >
+              {onlyFailed ? `显示全部（${entries.length}）` : `只看未成功（${marks.size}）`}
+            </button>
+            <span class="apps__marks-tip">
+              上次操作有 {marks.size} 个没成功，行内已标出原因
+            </span>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              onClick={() => {
+                setMarks(new Map());
+                setOnlyFailed(false);
+              }}
+            >
+              清除标记
+            </button>
+          </div>
+        )}
+
         {selected.size > 0 && (
           <div class="apps__batch">
             <span class="apps__batch-count">已选 {selected.size} 个</span>
@@ -303,6 +383,18 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
                   <span class="spinner" />
                   <div>正在读取应用列表（首次读取约需数秒）…</div>
                 </>
+              ) : onlyFailed ? (
+                /*
+                 * 「只看未成功」而结果为空：只可能是当前分类 / 搜索词把那些行挡住了。
+                 * 这时还沿用「没有匹配的应用 + 建议切到其他分类」会把原因说错 ——
+                 * 用户要看的东西确实存在，只是不在当前筛选里。
+                 */
+                <div>
+                  <div>当前筛选下没有未成功的应用</div>
+                  <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                    未成功的 {marks.size} 个在别的分类里，切到「全部」或清空搜索词就能看到。
+                  </div>
+                </div>
               ) : (
                 <div>
                   <div>没有匹配的应用</div>
@@ -331,66 +423,89 @@ export const AppsView: FunctionComponent<Props> = ({ tools }) => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((entry) => (
-                  <tr key={entry.name} data-selected={selected.has(entry.name)}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(entry.name)}
-                        onChange={() => toggle(entry.name)}
-                        aria-label={`选择 ${entry.name}`}
-                      />
-                    </td>
-                    <td class="table__mono">{entry.name}</td>
-                    <td>
-                      {entry.system ? (
-                        <span class="tag tag--neutral">系统</span>
-                      ) : (
-                        <span class="tag tag--accent">第三方</span>
-                      )}
-                    </td>
-                    <td>
-                      {entry.disabled ? (
-                        <span class="tag tag--warning">已冻结</span>
-                      ) : (
-                        <span class="tag tag--success">运行中</span>
-                      )}
-                    </td>
-                    <td>
-                      <div class="apps__row-actions">
-                        {entry.disabled ? (
-                          <button
-                            type="button"
-                            class="btn btn--ghost btn--sm"
-                            disabled={busy !== null}
-                            onClick={() => void act(entry.name, 'enable')}
-                          >
-                            启用
-                          </button>
+                {filtered.map((entry) => {
+                  const mark = marks.get(entry.name);
+                  return (
+                    <tr
+                      key={entry.name}
+                      data-selected={selected.has(entry.name)}
+                      data-outcome={mark?.status}
+                    >
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(entry.name)}
+                          onChange={() => toggle(entry.name)}
+                          aria-label={`选择 ${entry.name}`}
+                        />
+                      </td>
+                      <td class="table__mono">{entry.name}</td>
+                      <td>
+                        {entry.system ? (
+                          <span class="tag tag--neutral">系统</span>
                         ) : (
-                          <>
-                            <button
-                              type="button"
-                              class="btn btn--ghost btn--sm"
-                              disabled={busy !== null}
-                              onClick={() => void act(entry.name, 'disable')}
-                            >
-                              冻结
-                            </button>
-                            <button
-                              type="button"
-                              class="btn btn--ghost btn--sm"
-                              disabled={busy !== null}
-                              onClick={() => void act(entry.name, 'forceStop')}
-                            >
-                              停止
-                            </button>
-                          </>
+                          <span class="tag tag--accent">第三方</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        {mark ? (
+                          <>
+                            <span
+                              class={mark.status === 'skipped' ? 'tag tag--neutral' : 'tag tag--danger'}
+                              title={mark.message || '连接中断，这条命令没有发出去'}
+                            >
+                              {MARK_LABEL[mark.status]}
+                            </span>
+                            {/*
+                              * 原状态仍要显示：失败意味着「没改成」，用户得知道
+                              * 它现在还是运行中还是已冻结，才知道下一步该做什么。
+                              */}
+                            <span class="apps__state-note">
+                              {entry.disabled ? '已冻结' : '运行中'}
+                            </span>
+                          </>
+                        ) : entry.disabled ? (
+                          <span class="tag tag--warning">已冻结</span>
+                        ) : (
+                          <span class="tag tag--success">运行中</span>
+                        )}
+                      </td>
+                      <td>
+                        <div class="apps__row-actions">
+                          {entry.disabled ? (
+                            <button
+                              type="button"
+                              class="btn btn--ghost btn--sm"
+                              disabled={busy !== null}
+                              onClick={() => void act(entry.name, 'enable')}
+                            >
+                              启用
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                class="btn btn--ghost btn--sm"
+                                disabled={busy !== null}
+                                onClick={() => void act(entry.name, 'disable')}
+                              >
+                                冻结
+                              </button>
+                              <button
+                                type="button"
+                                class="btn btn--ghost btn--sm"
+                                disabled={busy !== null}
+                                onClick={() => void act(entry.name, 'forceStop')}
+                              >
+                                停止
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

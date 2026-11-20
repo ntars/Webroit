@@ -13,6 +13,7 @@ import {
   buildBatchReport,
   countFailed,
   countOk,
+  indexOutcomes,
   pickFailures,
   pickSkipped,
   type BatchOutcome,
@@ -183,5 +184,55 @@ describe('buildBatchReport：连接中断的剩余项', () => {
     const report = buildBatchReport(mixed(3, 0, 0), '卸载');
     expect(report.tone).toBe('error');
     expect(report.summary).toContain('成功 0 个');
+  });
+});
+
+/*
+ * 行级标记。
+ *
+ * 这一组的每一条都对应一个「用户接下来要做什么」的判断：
+ * 哪些行该被染色、染色后原状态还要不要显示、成功之后旧标记撤不撤。
+ */
+describe('indexOutcomes', () => {
+  it('只收未成功项：成功项不进索引', () => {
+    const marks = indexOutcomes([
+      { target: 'com.ok', ok: true, message: 'Success' },
+      { target: 'com.bad', ok: false, message: 'Failure [DENIED]' },
+      { target: 'com.skip', ok: false, skipped: true, message: '' },
+    ]);
+    expect([...marks.keys()]).toEqual(['com.bad', 'com.skip']);
+    expect(marks.get('com.bad')?.status).toBe('failed');
+    expect(marks.get('com.skip')?.status).toBe('skipped');
+  });
+
+  it('失败项带设备原文，未执行项不带（原文与设备无关）', () => {
+    const marks = indexOutcomes([
+      { target: 'com.bad', ok: false, message: 'Failure [DENIED]' },
+      { target: 'com.skip', ok: false, skipped: true, message: '连接已中断' },
+    ]);
+    expect(marks.get('com.bad')?.message).toBe('Failure [DENIED]');
+    // 未执行的原因在数据线，不在设备；留着这条原文会把人往设备问题上引
+    expect(marks.get('com.skip')?.message).toBe('');
+  });
+
+  it('同一目标重试成功后，旧标记被撤掉', () => {
+    const first = indexOutcomes([{ target: 'com.a', ok: false, message: 'DENIED' }]);
+    expect(first.size).toBe(1);
+    const second = indexOutcomes([{ target: 'com.a', ok: true, message: 'Success' }], first);
+    expect(second.size).toBe(0);
+  });
+
+  it('传 base 时在其基础上增删，不动其他行的标记', () => {
+    const base = indexOutcomes([{ target: 'com.a', ok: false, message: 'DENIED' }]);
+    const next = indexOutcomes([{ target: 'com.b', ok: false, message: 'TIMEOUT' }], base);
+    expect([...next.keys()].sort()).toEqual(['com.a', 'com.b']);
+    // 不改入参：base 仍是原来那一条，界面上的旧状态不会被就地改写
+    expect([...base.keys()]).toEqual(['com.a']);
+  });
+
+  it('空结果返回空 Map，不清空已有标记', () => {
+    const base = indexOutcomes([{ target: 'com.a', ok: false, message: 'DENIED' }]);
+    expect(indexOutcomes([], base).size).toBe(1);
+    expect(indexOutcomes([]).size).toBe(0);
   });
 });

@@ -274,6 +274,76 @@ check(
   overflow ? `left ${Math.round(overflow.left)} / right ${Math.round(overflow.right)} / 视口 ${overflow.docWidth}` : '未测量',
 );
 
+/* ── 4. 未成功标记：行级染色与工具条在 375px 下不溢出 ── */
+/*
+ * 这一段量的是 T-021 新加的两块界面：行级标记（`data-outcome`）与
+ * 「只看未成功」工具条。它们只有在真连上设备、真跑一批失败操作时才会
+ * 渲染，而探针不连设备 —— 所以这里把同样的结构插进页面再量。
+ *
+ * 插的是类名与层级，量的是真 CSS：气泡、按钮高度、bar 里的三段文本
+ * 在 375px 会不会把内容区撑宽。样式对不对，靠这一段兜。
+ */
+await evaluate(`(() => {
+  const host = document.querySelector('.content') ?? document.body;
+  const wrap = document.createElement('div');
+  wrap.id = 'probe-marks';
+  wrap.innerHTML = \`
+    <div class="apps__marks-bar">
+      <button type="button" class="btn btn--ghost btn--sm" data-active="false">只看未成功（12）</button>
+      <span class="apps__marks-tip">上次操作有 12 个没成功，行内已标出原因</span>
+      <button type="button" class="btn btn--ghost btn--sm">清除标记</button>
+    </div>
+    <div class="apps__list"><table class="table"><tbody>
+      <tr data-outcome="failed">
+        <td><span class="tag tag--danger" title="Failure [DELETE_FAILED_INTERNAL_ERROR]">失败</span>
+            <span class="apps__state-note">运行中</span></td>
+        <td class="table__mono">com.example.a.very.long.package.name.for.overflow</td>
+      </tr>
+      <tr data-outcome="skipped">
+        <td><span class="tag tag--neutral">未执行</span>
+            <span class="apps__state-note">已冻结</span></td>
+        <td class="table__mono">com.example.short</td>
+      </tr>
+    </tbody></table>\`;
+  host.appendChild(wrap);
+  return true;
+})()`);
+await settle();
+
+const marks = await evaluate(`(() => {
+  const wrap = document.getElementById('probe-marks');
+  const bar = wrap.querySelector('.apps__marks-bar');
+  const buttons = [...bar.querySelectorAll('button')];
+  const rows = [...wrap.querySelectorAll('tbody tr')];
+  const docWidth = document.documentElement.clientWidth;
+  const rect = bar.getBoundingClientRect();
+  return {
+    barOverflow: Math.round(rect.right - docWidth),
+    docOverflow: document.documentElement.scrollWidth - docWidth,
+    // 工具条里三个控件在窄屏会被压到同一行，实测最矮的那个有多高
+    minButtonHeight: Math.min(...buttons.map((b) => Math.round(b.getBoundingClientRect().height))),
+    failedBorder: getComputedStyle(rows[0]).boxShadow,
+    skippedBorder: getComputedStyle(rows[1]).boxShadow,
+    failedBg: getComputedStyle(rows[0]).backgroundColor,
+    skippedBg: getComputedStyle(rows[1]).backgroundColor,
+  };
+})()`);
+
+check('标记条不撑宽内容区', marks.barOverflow <= 0.5, `右边缘超出 ${marks.barOverflow}px`);
+check('标记条不引发横向滚动', marks.docOverflow <= 0, `文档溢出 ${marks.docOverflow}px`);
+check('标记条按钮仍有 28px 高', marks.minButtonHeight >= 28, `${marks.minButtonHeight}px`);
+// 失败与未执行必须看得出区别：一个染底色 + 红边，一个只留灰边
+check(
+  '失败行染底色并带红边',
+  marks.failedBg !== 'rgba(0, 0, 0, 0)' && marks.failedBorder.includes('inset'),
+  `${marks.failedBg} / ${marks.failedBorder}`,
+);
+check(
+  '未执行行不染红底，只留灰边',
+  marks.skippedBg === 'rgba(0, 0, 0, 0)' && marks.skippedBorder.includes('inset'),
+  `${marks.skippedBg} / ${marks.skippedBorder}`,
+);
+
 /* ── 输出 ── */
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length} 项，通过 ${results.length - failed.length}，失败 ${failed.length}`);

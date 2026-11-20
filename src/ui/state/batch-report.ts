@@ -162,6 +162,58 @@ export function buildBatchReport(
   return { tone: 'error', summary, lines };
 }
 
+/* ─────────────── 行级标记 ─────────────── */
+
+/**
+ * 一行在批量操作后的状态。
+ *
+ * 只有「没成功」才需要标记：成功项的状态列为「运行中 / 已冻结」本身就说明了一切，
+ * 再挂一个绿色标签是噪音。所以这里是 `failed | skipped`，没有 `ok`。
+ */
+export type RowStatus = 'failed' | 'skipped';
+
+/** 列表里某一行的标记：状态 + 设备原文 */
+export interface RowMark {
+  status: RowStatus;
+  /** 失败时为设备返回的错误原文；未执行时为空串 */
+  message: string;
+}
+
+/**
+ * 把批量结果数组折算成「行 -> 标记」的索引。
+ *
+ * 为什么要有这一层：批量播报把「失败几个、叫什么」写进了提示条与终端，
+ * 但用户接下来要做的事是**回到列表里找到那几行**再决定重试还是排查。
+ * 300 行的列表、只有几个失败项、提示条 5 秒后自动消失 —— 只靠 toast，
+ * 用户读完终端得自己拿包名在搜索框里一个个找回来。这是 T-015 起连续
+ * 七轮登记的那条缺口。
+ *
+ * 同一目标出现多次时以最后一次为准（用户可能对同一行连做两次操作），
+ * 成功的那次会把它从索引里删掉，不会残留上一次的失败标记。
+ *
+ * @param outcomes 归一化后的结果数组
+ * @param base 上一轮已有的标记；传入则在其基础上增删，不传则从空开始
+ * @returns 只含未成功项的 Map，键为目标标识（包名 / 组件名）
+ */
+export function indexOutcomes(
+  outcomes: readonly BatchOutcome[],
+  base?: ReadonlyMap<string, RowMark>,
+): Map<string, RowMark> {
+  const marks = new Map(base ?? []);
+  for (const item of outcomes) {
+    if (item.ok) {
+      marks.delete(item.target);
+      continue;
+    }
+    marks.set(item.target, {
+      // `skipped` 优先：一条既没发出去又被标成 false 的记录，原因在断线而不在设备
+      status: item.skipped === true ? 'skipped' : 'failed',
+      message: item.skipped === true ? '' : item.message,
+    });
+  }
+  return marks;
+}
+
 /**
  * 失败原文的清洗。
  *
